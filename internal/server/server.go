@@ -22,8 +22,9 @@ const (
 	// Protocol constants
 	ProtocolVersion = 1
 
-	// Message type for binary audio chunks (player role uses type 1)
-	AudioChunkMessageType = 1
+	// Message type for binary audio chunks
+	// Per spec: Player role binary messages use IDs 4-7 (bits 000001xx), slot 0 is audio
+	AudioChunkMessageType = 4
 )
 
 // Config holds server configuration
