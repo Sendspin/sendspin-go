@@ -6,10 +6,17 @@ import (
 	"container/heap"
 	"context"
 	"log"
+	gosync "sync"
 	"time"
 
 	"github.com/Sendspin/sendspin-go/internal/audio"
 	"github.com/Sendspin/sendspin-go/internal/sync"
+)
+
+const (
+	// Chunk timing (must match server constants)
+	ChunkDurationMs = 20  // 20ms chunks
+	BufferAheadMs   = 500 // Server sends audio 500ms ahead
 )
 
 // Scheduler manages playback timing
@@ -23,7 +30,8 @@ type Scheduler struct {
 	buffering    bool
 	bufferTarget int // Number of chunks to buffer before starting playback
 
-	stats SchedulerStats
+	stats   SchedulerStats
+	statsMu gosync.RWMutex
 }
 
 // SchedulerStats tracks scheduler metrics
@@ -37,9 +45,8 @@ type SchedulerStats struct {
 func NewScheduler(clockSync *sync.ClockSync, jitterMs int) *Scheduler {
 	ctx, cancel := context.WithCancel(context.Background())
 
-	// Buffer 25 chunks (500ms at 20ms/chunk) to match server's 500ms lead time
-	// This aligns with the server sending chunks at playbackTime = now + 500ms
-	bufferTarget := 25
+	// Buffer chunks to match server's lead time (BufferAheadMs / ChunkDurationMs)
+	bufferTarget := BufferAheadMs / ChunkDurationMs
 
 	return &Scheduler{
 		clockSync:    clockSync,
@@ -58,17 +65,21 @@ func (s *Scheduler) Schedule(buf audio.Buffer) {
 	// Convert server timestamp to local play time
 	buf.PlayAt = s.clockSync.ServerToLocalTime(buf.Timestamp)
 
+	s.statsMu.Lock()
+	received := s.stats.Received
+	s.stats.Received++
+	s.statsMu.Unlock()
+
 	// Sanity logs for first 5 chunks showing timing
-	if s.stats.Received < 5 {
+	if received < 5 {
 		serverNow := sync.ServerMicrosNow()
 		diff := buf.Timestamp - serverNow
 		rtt, quality := s.clockSync.GetStats()
 
 		log.Printf("Chunk #%d: timestamp=%dµs, serverNow=%dµs, diff=%dµs (%.1fms), rtt=%dµs, quality=%v",
-			s.stats.Received, buf.Timestamp, serverNow, diff, float64(diff)/1000.0, rtt, quality)
+			received, buf.Timestamp, serverNow, diff, float64(diff)/1000.0, rtt, quality)
 	}
 
-	s.stats.Received++
 	heap.Push(s.bufferQ, buf)
 }
 
@@ -113,7 +124,9 @@ func (s *Scheduler) processQueue() {
 		} else if delay < -50*time.Millisecond {
 			// Too late (>50ms), drop
 			heap.Pop(s.bufferQ)
+			s.statsMu.Lock()
 			s.stats.Dropped++
+			s.statsMu.Unlock()
 			log.Printf("Dropped late buffer: %v late", -delay)
 		} else {
 			// Ready to play (within ±50ms window)
@@ -121,7 +134,9 @@ func (s *Scheduler) processQueue() {
 
 			select {
 			case s.output <- buf:
+				s.statsMu.Lock()
 				s.stats.Played++
+				s.statsMu.Unlock()
 			case <-s.ctx.Done():
 				return
 			}
@@ -136,13 +151,14 @@ func (s *Scheduler) Output() <-chan audio.Buffer {
 
 // Stats returns scheduler statistics
 func (s *Scheduler) Stats() SchedulerStats {
+	s.statsMu.RLock()
+	defer s.statsMu.RUnlock()
 	return s.stats
 }
 
 // BufferDepth returns the current buffer queue depth in milliseconds
 func (s *Scheduler) BufferDepth() int {
-	// Each buffer is typically 10ms (480 samples at 48kHz)
-	return s.bufferQ.Len() * 10
+	return s.bufferQ.Len() * ChunkDurationMs
 }
 
 // Stop stops the scheduler
