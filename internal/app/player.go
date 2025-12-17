@@ -151,8 +151,8 @@ func (p *Player) connect(serverAddr string) error {
 			SoftwareVersion: version.Version,
 		},
 		PlayerSupport: protocol.PlayerSupport{
-			// New spec format - hi-res formats first (MA provider picks first format)
-			SupportFormats: []protocol.AudioFormat{
+			// Hi-res formats first (MA provider picks first supported format)
+			SupportedFormats: []protocol.AudioFormat{
 				// PCM hi-res - highest quality first
 				{Codec: "pcm", Channels: 2, SampleRate: 192000, BitDepth: 24},
 				{Codec: "pcm", Channels: 2, SampleRate: 176400, BitDepth: 24},
@@ -166,16 +166,16 @@ func (p *Player) connect(serverAddr string) error {
 			},
 			BufferCapacity:    1048576,
 			SupportedCommands: []string{"volume", "mute"},
-			// Legacy format (Music Assistant compatibility - highest quality first)
-			SupportCodecs:      []string{"pcm", "opus"},
-			SupportChannels:    []int{2, 1},
-			SupportSampleRates: []int{192000, 176400, 96000, 88200, 48000, 44100},
-			SupportBitDepth:    []int{24, 16},
 		},
 		MetadataSupport: protocol.MetadataSupport{
 			SupportPictureFormats: []string{"jpeg", "png", "webp"},
 			MediaWidth:            600, // Request 600px artwork (good balance)
 			MediaHeight:           600,
+		},
+		ArtworkSupport: protocol.ArtworkSupport{
+			Channels: []protocol.ArtworkChannel{
+				{Source: "album", Format: "jpeg", MediaWidth: 600, MediaHeight: 600},
+			},
 		},
 		VisualizerSupport: protocol.VisualizerSupport{
 			BufferCapacity: 1048576, // 1MB buffer for visualization data

@@ -208,35 +208,24 @@ func (e *AudioEngine) negotiateCodec(client *Client) string {
 
 	sourceRate := e.source.SampleRate()
 
-	// Check newer support_formats array first (spec-compliant)
 	// Strategy:
 	// 1. If client supports PCM at native rate → use PCM (lossless hi-res)
 	// 2. If client supports Opus → use Opus with resampling (bandwidth efficient)
 	// 3. Otherwise → fall back to PCM
 
 	// Check if client supports PCM at our native sample rate (lossless hi-res)
-	for _, format := range client.Capabilities.SupportFormats {
+	for _, format := range client.Capabilities.SupportedFormats {
 		if format.Codec == "pcm" && format.SampleRate == sourceRate && format.BitDepth == DefaultBitDepth {
 			return "pcm"
 		}
 	}
 
-	// Check if client supports Opus (we can resample any source rate to 48kHz)
-	for _, format := range client.Capabilities.SupportFormats {
+	// Check if client supports Opus or FLAC
+	for _, format := range client.Capabilities.SupportedFormats {
 		if format.Codec == "opus" {
 			return "opus"
 		}
 		if format.Codec == "flac" {
-			return "flac"
-		}
-	}
-
-	// Check legacy support_codecs array (Music Assistant compatibility)
-	for _, codec := range client.Capabilities.SupportCodecs {
-		if codec == "opus" {
-			return "opus"
-		}
-		if codec == "flac" {
 			return "flac"
 		}
 	}

@@ -25,6 +25,7 @@ type ClientHello struct {
 	// Uses unversioned keys like "player_support" instead of "player@v1_support"
 	PlayerSupport     *PlayerSupport     `json:"player_support,omitempty"`
 	MetadataSupport   *MetadataSupport   `json:"metadata_support,omitempty"`
+	ArtworkSupport    *ArtworkSupport    `json:"artwork_support,omitempty"`
 	VisualizerSupport *VisualizerSupport `json:"visualizer_support,omitempty"`
 }
 
@@ -234,6 +235,9 @@ type SessionUpdate struct {
 // VisualizerSupport is a legacy alias for VisualizerV1Support
 type VisualizerSupport = VisualizerV1Support
 
+// ArtworkSupport is a legacy alias for ArtworkV1Support
+type ArtworkSupport = ArtworkV1Support
+
 // ClientState is a legacy alias for PlayerState (flat format used with client/state)
 type ClientState struct {
 	State  string `json:"state"`  // "synchronized" or "error"
@@ -248,17 +252,9 @@ type ServerCommand struct {
 	Mute    bool   `json:"mute,omitempty"`
 }
 
-// PlayerSupport is a legacy format for player capabilities (Music Assistant compatibility)
-// Uses different JSON tags than PlayerV1Support: support_formats vs supported_formats
+// PlayerSupport is a format for player capabilities (Music Assistant / aiosendspin compatibility)
 type PlayerSupport struct {
-	// Uses support_formats (MA format) not supported_formats (spec format)
-	SupportFormats    []AudioFormat `json:"support_formats,omitempty"`
+	SupportedFormats  []AudioFormat `json:"supported_formats,omitempty"`
 	BufferCapacity    int           `json:"buffer_capacity,omitempty"`
 	SupportedCommands []string      `json:"supported_commands,omitempty"`
-
-	// Legacy arrays (MA compatibility)
-	SupportCodecs      []string `json:"support_codecs,omitempty"`
-	SupportChannels    []int    `json:"support_channels,omitempty"`
-	SupportSampleRates []int    `json:"support_sample_rates,omitempty"`
-	SupportBitDepth    []int    `json:"support_bit_depth,omitempty"`
 }

@@ -31,6 +31,7 @@ type Config struct {
 	DeviceInfo        protocol.DeviceInfo
 	PlayerSupport     protocol.PlayerSupport
 	MetadataSupport   protocol.MetadataSupport
+	ArtworkSupport    protocol.ArtworkSupport
 	VisualizerSupport protocol.VisualizerSupport
 }
 
@@ -106,15 +107,16 @@ func (c *Client) Connect() error {
 
 // handshake performs the protocol handshake
 func (c *Client) handshake() error {
-	// Send client/hello
+	// Send client/hello with versioned roles per Sendspin Protocol spec
+	// Note: metadata@v1 role doesn't require a support config, artwork@v1 uses artwork_support
 	hello := protocol.ClientHello{
 		ClientID:          c.config.ClientID,
 		Name:              c.config.Name,
 		Version:           c.config.Version,
-		SupportedRoles:    []string{"player", "metadata", "visualizer"},
+		SupportedRoles:    []string{"player@v1", "metadata@v1", "artwork@v1", "visualizer@v1"},
 		DeviceInfo:        &c.config.DeviceInfo,
 		PlayerSupport:     &c.config.PlayerSupport,
-		MetadataSupport:   &c.config.MetadataSupport,
+		ArtworkSupport:    &c.config.ArtworkSupport,
 		VisualizerSupport: &c.config.VisualizerSupport,
 	}
 
