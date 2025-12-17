@@ -1,4 +1,4 @@
-// ABOUTME: WebSocket client for Resonate Protocol communication
+// ABOUTME: WebSocket client for Sendspin Protocol communication
 // ABOUTME: Handles connection, handshake, and message routing
 package client
 
@@ -14,6 +14,12 @@ import (
 
 	"github.com/Sendspin/sendspin-go/internal/protocol"
 	"github.com/gorilla/websocket"
+)
+
+const (
+	// AudioChunkMessageType is the binary message type ID for audio chunks
+	// Per spec: Player role binary messages use IDs 4-7 (bits 000001xx), slot 0 is audio
+	AudioChunkMessageType = 4
 )
 
 // Config holds client configuration
@@ -210,7 +216,7 @@ func (c *Client) handleBinaryMessage(data []byte) {
 	}
 
 	msgType := data[0]
-	if msgType != 1 {
+	if msgType != AudioChunkMessageType {
 		log.Printf("Unknown binary message type: %d", msgType)
 		return
 	}
@@ -273,6 +279,22 @@ func (c *Client) handleJSONMessage(data []byte) {
 		case <-c.ctx.Done():
 		}
 
+	case "server/state":
+		// New spec message type for metadata (replaces stream/metadata)
+		var state struct {
+			Metadata *protocol.StreamMetadata `json:"metadata,omitempty"`
+		}
+		if err := json.Unmarshal(payloadBytes, &state); err != nil {
+			log.Printf("Failed to parse server/state: %v", err)
+			return
+		}
+		if state.Metadata != nil {
+			select {
+			case c.Metadata <- *state.Metadata:
+			case <-c.ctx.Done():
+			}
+		}
+
 	case "session/update":
 		var update protocol.SessionUpdate
 		if err := json.Unmarshal(payloadBytes, &update); err != nil {
@@ -290,16 +312,37 @@ func (c *Client) handleJSONMessage(data []byte) {
 			log.Printf("Session update channel full, dropping message")
 		}
 
+	case "group/update":
+		// New spec message type (similar to session/update)
+		var update protocol.SessionUpdate
+		if err := json.Unmarshal(payloadBytes, &update); err != nil {
+			log.Printf("Failed to parse group/update: %v", err)
+			return
+		}
+		log.Printf("Group update: group=%s, state=%s", update.GroupID, update.PlaybackState)
+		// Send to channel for player to handle
+		select {
+		case c.SessionUpdate <- update:
+		case <-time.After(100 * time.Millisecond):
+			log.Printf("Group update channel full, dropping message")
+		}
+
 	default:
 		log.Printf("Unknown message type: %s", msg.Type)
 	}
 }
 
-// SendState sends a player/update message
+// SendState sends a client/state message per spec
 func (c *Client) SendState(state protocol.ClientState) error {
+	// Wrap in nested structure per spec: client/state has player: {...}
+	payload := struct {
+		Player *protocol.ClientState `json:"player,omitempty"`
+	}{
+		Player: &state,
+	}
 	msg := protocol.Message{
-		Type:    "player/update",
-		Payload: state,
+		Type:    "client/state",
+		Payload: payload,
 	}
 	return c.sendJSON(msg)
 }

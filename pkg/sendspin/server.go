@@ -770,9 +770,12 @@ func (s *Server) hasRole(c *client, role string) bool {
 }
 
 // activateRoles returns the active roles based on client's supported roles
+// Preserves input order (first occurrence of each role family)
 func (s *Server) activateRoles(supportedRoles []string) []string {
-	// Map role families to their first match
-	activated := make(map[string]string)
+	// Track which families we've seen to avoid duplicates
+	seen := make(map[string]bool)
+	// Result preserves input order
+	result := make([]string, 0, len(supportedRoles))
 
 	for _, role := range supportedRoles {
 		// Extract role family (e.g., "player" from "player@v1")
@@ -782,20 +785,18 @@ func (s *Server) activateRoles(supportedRoles []string) []string {
 		}
 
 		// Only keep the first (highest priority) version of each role
-		if _, exists := activated[family]; !exists {
-			// Check if we support this role
-			switch family {
-			case "player", "metadata", "visualizer", "artwork", "controller":
-				activated[family] = role
-			}
+		if seen[family] {
+			continue
+		}
+
+		// Check if we support this role family
+		switch family {
+		case "player", "metadata", "visualizer", "artwork", "controller":
+			seen[family] = true
+			result = append(result, role)
 		}
 	}
 
-	// Convert map to slice
-	result := make([]string, 0, len(activated))
-	for _, role := range activated {
-		result = append(result, role)
-	}
 	return result
 }
 

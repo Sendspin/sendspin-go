@@ -1,4 +1,4 @@
-// ABOUTME: Resonate Protocol message type definitions
+// ABOUTME: Sendspin Protocol message type definitions
 // ABOUTME: Defines structs for all message types in the protocol
 package protocol
 
@@ -69,9 +69,9 @@ type ServerHello struct {
 	Version  int    `json:"version"`
 }
 
-// ClientState reports the player's current state (sent as player/update message)
+// ClientState reports the player's current state (sent as client/state message)
 type ClientState struct {
-	State  string `json:"state"`  // "playing" or "idle"
+	State  string `json:"state"`  // "synchronized" or "error" (per spec)
 	Volume int    `json:"volume"` // 0-100
 	Muted  bool   `json:"muted"`  // All fields are required
 }

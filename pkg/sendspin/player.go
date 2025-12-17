@@ -96,10 +96,12 @@ type Player struct {
 	decoder   decode.Decoder
 
 	// State
-	state      PlayerState
-	ctx        context.Context
-	cancel     context.CancelFunc
-	serverAddr string
+	state           PlayerState
+	ctx             context.Context
+	cancel          context.CancelFunc
+	serverAddr      string
+	schedulerCtx    context.Context    // Context for scheduler goroutines
+	schedulerCancel context.CancelFunc // Cancel function for scheduler goroutines
 }
 
 // NewPlayer creates a new player with the given configuration
@@ -346,10 +348,21 @@ func (p *Player) handleStreamStart() {
 			p.state.State = "playing"
 			p.notifyStateChange()
 
+			// Stop any existing scheduler goroutines before starting new ones
+			if p.schedulerCancel != nil {
+				p.schedulerCancel()
+			}
+			if p.scheduler != nil {
+				p.scheduler.Stop()
+			}
+
+			// Create new scheduler context
+			p.schedulerCtx, p.schedulerCancel = context.WithCancel(p.ctx)
+
 			// Initialize scheduler
 			p.scheduler = NewScheduler(p.clockSync, p.config.BufferMs)
 			go p.scheduler.Run()
-			go p.handleScheduledAudio()
+			go p.handleScheduledAudio(p.schedulerCtx)
 
 		case <-p.ctx.Done():
 			return
@@ -387,7 +400,7 @@ func (p *Player) handleAudioChunks() {
 }
 
 // handleScheduledAudio plays scheduled buffers
-func (p *Player) handleScheduledAudio() {
+func (p *Player) handleScheduledAudio(ctx context.Context) {
 	for {
 		select {
 		case buf := <-p.scheduler.Output():
@@ -395,7 +408,7 @@ func (p *Player) handleScheduledAudio() {
 				p.notifyError(fmt.Errorf("playback error: %w", err))
 			}
 
-		case <-p.ctx.Done():
+		case <-ctx.Done():
 			return
 		}
 	}

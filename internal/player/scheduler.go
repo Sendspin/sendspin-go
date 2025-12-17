@@ -23,6 +23,7 @@ const (
 type Scheduler struct {
 	clockSync    *sync.ClockSync
 	bufferQ      *BufferQueue
+	bufferMu     gosync.Mutex // Protects bufferQ and buffering
 	output       chan audio.Buffer
 	jitterMs     int
 	ctx          context.Context
@@ -80,7 +81,9 @@ func (s *Scheduler) Schedule(buf audio.Buffer) {
 			received, buf.Timestamp, serverNow, diff, float64(diff)/1000.0, rtt, quality)
 	}
 
+	s.bufferMu.Lock()
 	heap.Push(s.bufferQ, buf)
+	s.bufferMu.Unlock()
 }
 
 // Run starts the scheduler loop
@@ -100,6 +103,8 @@ func (s *Scheduler) Run() {
 
 // processQueue checks for buffers ready to play
 func (s *Scheduler) processQueue() {
+	s.bufferMu.Lock()
+
 	// Check if we're still buffering at startup
 	if s.buffering {
 		if s.bufferQ.Len() >= s.bufferTarget {
@@ -107,6 +112,7 @@ func (s *Scheduler) processQueue() {
 			s.buffering = false
 		} else {
 			// Still buffering, don't start playback yet
+			s.bufferMu.Unlock()
 			return
 		}
 	}
@@ -131,6 +137,8 @@ func (s *Scheduler) processQueue() {
 		} else {
 			// Ready to play (within ±50ms window)
 			heap.Pop(s.bufferQ)
+			// Unlock before sending to avoid blocking while holding lock
+			s.bufferMu.Unlock()
 
 			select {
 			case s.output <- buf:
@@ -140,8 +148,13 @@ func (s *Scheduler) processQueue() {
 			case <-s.ctx.Done():
 				return
 			}
+
+			// Re-acquire lock for next iteration
+			s.bufferMu.Lock()
 		}
 	}
+
+	s.bufferMu.Unlock()
 }
 
 // Output returns the output channel
@@ -158,12 +171,26 @@ func (s *Scheduler) Stats() SchedulerStats {
 
 // BufferDepth returns the current buffer queue depth in milliseconds
 func (s *Scheduler) BufferDepth() int {
-	return s.bufferQ.Len() * ChunkDurationMs
+	s.bufferMu.Lock()
+	depth := s.bufferQ.Len() * ChunkDurationMs
+	s.bufferMu.Unlock()
+	return depth
 }
 
 // Stop stops the scheduler
 func (s *Scheduler) Stop() {
 	s.cancel()
+}
+
+// Clear clears all buffered audio (used for seek operations)
+func (s *Scheduler) Clear() {
+	s.bufferMu.Lock()
+	defer s.bufferMu.Unlock()
+	// Reset the buffer queue
+	s.bufferQ = NewBufferQueue()
+	// Re-enter buffering mode to rebuild buffer
+	s.buffering = true
+	log.Printf("Scheduler buffers cleared, re-entering buffering mode")
 }
 
 // BufferQueue is a priority queue for audio buffers

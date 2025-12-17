@@ -260,7 +260,6 @@ func (c *Client) handleJSONMessage(data []byte) {
 		return
 	}
 
-	log.Printf("Received message type: %s", msg.Type)
 	payloadBytes, _ := json.Marshal(msg.Payload)
 
 	switch msg.Type {
