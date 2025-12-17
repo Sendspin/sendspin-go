@@ -152,17 +152,12 @@ func (c *Client) handshake() error {
 
 	// Send initial state
 	state := protocol.ClientState{
-		State:  "idle",
+		State:  "synchronized",
 		Volume: 100,
 		Muted:  false,
 	}
 
-	stateMsg := protocol.Message{
-		Type:    "player/update",
-		Payload: state,
-	}
-
-	if err := c.sendJSON(stateMsg); err != nil {
+	if err := c.SendState(state); err != nil {
 		return fmt.Errorf("failed to send initial state: %w", err)
 	}
 

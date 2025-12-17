@@ -483,7 +483,9 @@ func (s *Server) handleClientMessage(client *Client, data []byte) {
 	case "client/time":
 		s.handleTimeSync(client, msg.Payload)
 	case "player/update":
-		s.handlePlayerUpdate(client, msg.Payload)
+		s.handleClientState(client, msg.Payload)
+	case "client/state":
+		s.handleClientState(client, msg.Payload)
 	default:
 		log.Printf("Unknown message type: %s", msg.Type)
 	}
@@ -530,20 +532,35 @@ func (s *Server) handleTimeSync(client *Client, payload interface{}) {
 	}
 }
 
-// handlePlayerUpdate handles state updates from players
-func (s *Server) handlePlayerUpdate(client *Client, payload interface{}) {
+// handleClientState handles state updates from clients.
+// Supports both legacy "player/update" payloads and spec-style "client/state" payloads.
+func (s *Server) handleClientState(client *Client, payload interface{}) {
 	stateData, err := json.Marshal(payload)
 	if err != nil {
 		log.Printf("Error marshaling state payload: %v", err)
 		return
 	}
 
-	var state protocol.ClientState
-	if err := json.Unmarshal(stateData, &state); err != nil {
-		log.Printf("Error unmarshaling client state: %v", err)
+	// Spec-style wrapper: { "player": { ... } }
+	var wrapped struct {
+		Player *protocol.ClientState `json:"player,omitempty"`
+	}
+	if err := json.Unmarshal(stateData, &wrapped); err == nil && wrapped.Player != nil {
+		s.applyClientState(client, *wrapped.Player)
 		return
 	}
 
+	// Legacy payload: { "state": "...", "volume": ..., "muted": ... }
+	var state protocol.ClientState
+	if err := json.Unmarshal(stateData, &state); err == nil {
+		s.applyClientState(client, state)
+		return
+	}
+
+	log.Printf("Error unmarshaling client state: %s", string(stateData))
+}
+
+func (s *Server) applyClientState(client *Client, state protocol.ClientState) {
 	client.mu.Lock()
 	client.State = state.State
 	client.Volume = state.Volume
