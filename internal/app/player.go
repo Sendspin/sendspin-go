@@ -14,10 +14,10 @@ import (
 	"github.com/Sendspin/sendspin-go/internal/client"
 	"github.com/Sendspin/sendspin-go/internal/discovery"
 	"github.com/Sendspin/sendspin-go/internal/player"
-	"github.com/Sendspin/sendspin-go/internal/protocol"
 	"github.com/Sendspin/sendspin-go/internal/sync"
 	"github.com/Sendspin/sendspin-go/internal/ui"
 	"github.com/Sendspin/sendspin-go/internal/version"
+	"github.com/Sendspin/sendspin-go/pkg/protocol"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/google/uuid"
 )

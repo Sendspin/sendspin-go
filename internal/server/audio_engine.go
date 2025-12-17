@@ -8,7 +8,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/Sendspin/sendspin-go/internal/protocol"
+	"github.com/Sendspin/sendspin-go/pkg/protocol"
 )
 
 const (

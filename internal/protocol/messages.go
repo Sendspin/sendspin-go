@@ -1,5 +1,8 @@
-// ABOUTME: Sendspin Protocol message type definitions
-// ABOUTME: Defines structs for all message types in the protocol
+// ABOUTME: DEPRECATED - Use pkg/protocol instead
+// ABOUTME: Legacy message types kept for backward compatibility tests
+//
+// Deprecated: This package is deprecated. Use github.com/Sendspin/sendspin-go/pkg/protocol instead.
+// All new code should import pkg/protocol which contains spec-aligned message types.
 package protocol
 
 // Message is the top-level wrapper for all protocol messages

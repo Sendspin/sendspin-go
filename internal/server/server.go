@@ -13,7 +13,7 @@ import (
 	"time"
 
 	"github.com/Sendspin/sendspin-go/internal/discovery"
-	"github.com/Sendspin/sendspin-go/internal/protocol"
+	"github.com/Sendspin/sendspin-go/pkg/protocol"
 	"github.com/google/uuid"
 	"github.com/gorilla/websocket"
 )
