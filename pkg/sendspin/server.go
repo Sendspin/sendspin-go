@@ -770,7 +770,8 @@ func (s *Server) hasRole(c *client, role string) bool {
 }
 
 // activateRoles returns the active roles based on client's supported roles
-// Preserves input order (first occurrence of each role family)
+// Only activates roles that this server actually implements.
+// Preserves input order (first occurrence of each role family).
 func (s *Server) activateRoles(supportedRoles []string) []string {
 	// Track which families we've seen to avoid duplicates
 	seen := make(map[string]bool)
@@ -789,9 +790,12 @@ func (s *Server) activateRoles(supportedRoles []string) []string {
 			continue
 		}
 
-		// Check if we support this role family
+		// Only activate roles this server actually implements
+		// - player: audio streaming (implemented)
+		// - metadata: track info via server/state (implemented)
+		// - visualizer, artwork, controller: NOT implemented
 		switch family {
-		case "player", "metadata", "visualizer", "artwork", "controller":
+		case "player", "metadata":
 			seen[family] = true
 			result = append(result, role)
 		}

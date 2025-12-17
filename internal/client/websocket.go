@@ -79,7 +79,7 @@ func NewClient(config Config) *Client {
 
 // Connect establishes WebSocket connection and performs handshake
 func (c *Client) Connect() error {
-	u := url.URL{Scheme: "ws", Host: c.config.ServerAddr, Path: "/resonate"}
+	u := url.URL{Scheme: "ws", Host: c.config.ServerAddr, Path: "/sendspin"}
 	log.Printf("Connecting to %s", u.String())
 
 	conn, _, err := websocket.DefaultDialer.Dial(u.String(), nil)

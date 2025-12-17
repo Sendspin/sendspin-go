@@ -37,17 +37,22 @@ type SchedulerStats struct {
 }
 
 // NewScheduler creates a playback scheduler
-func NewScheduler(clockSync *sync.ClockSync, jitterMs int) *Scheduler {
+// bufferMs controls startup buffering: how many ms of audio to accumulate before playback
+func NewScheduler(clockSync *sync.ClockSync, bufferMs int) *Scheduler {
 	ctx, cancel := context.WithCancel(context.Background())
 
-	// Buffer chunks to match server's lead time (BufferAheadMs / ChunkDurationMs)
-	bufferTarget := BufferAheadMs / ChunkDurationMs
+	// Calculate buffer target from user config (bufferMs / ChunkDurationMs)
+	// This determines how many chunks to buffer before starting playback
+	bufferTarget := bufferMs / ChunkDurationMs
+	if bufferTarget < 1 {
+		bufferTarget = 1 // Minimum 1 chunk
+	}
 
 	return &Scheduler{
 		clockSync:    clockSync,
 		bufferQ:      NewBufferQueue(),
 		output:       make(chan audio.Buffer, 10),
-		jitterMs:     jitterMs,
+		jitterMs:     bufferMs, // Store for potential future use
 		ctx:          ctx,
 		cancel:       cancel,
 		buffering:    true,
