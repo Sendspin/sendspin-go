@@ -107,17 +107,47 @@ func (c *Client) Connect() error {
 
 // handshake performs the protocol handshake
 func (c *Client) handshake() error {
-	// Send client/hello with versioned roles per Sendspin Protocol spec
-	// Note: metadata@v1 role doesn't require a support config, artwork@v1 uses artwork_support
+	// Build versioned role list per spec
+	roles := []string{"player@v1", "metadata@v1"}
+	if c.config.ArtworkV1Support != nil {
+		roles = append(roles, "artwork@v1")
+	}
+	if c.config.VisualizerV1Support != nil {
+		roles = append(roles, "visualizer@v1")
+	}
+
+	// Create legacy PlayerSupport for Music Assistant compatibility
+	legacyPlayerSupport := protocol.PlayerSupport{
+		SupportedFormats:  c.config.PlayerV1Support.SupportedFormats,
+		BufferCapacity:    c.config.PlayerV1Support.BufferCapacity,
+		SupportedCommands: c.config.PlayerV1Support.SupportedCommands,
+	}
+
+	// Create legacy MetadataSupport for Music Assistant compatibility
+	legacyMetadataSupport := protocol.MetadataSupport{
+		SupportPictureFormats: []string{"jpeg", "png", "webp"},
+		MediaWidth:            600,
+		MediaHeight:           600,
+	}
+
+	// Send client/hello with BOTH versioned and legacy fields
 	hello := protocol.ClientHello{
-		ClientID:          c.config.ClientID,
-		Name:              c.config.Name,
-		Version:           c.config.Version,
-		SupportedRoles:    []string{"player@v1", "metadata@v1", "artwork@v1", "visualizer@v1"},
-		DeviceInfo:        &c.config.DeviceInfo,
-		PlayerSupport:     &c.config.PlayerSupport,
-		ArtworkSupport:    &c.config.ArtworkSupport,
-		VisualizerSupport: &c.config.VisualizerSupport,
+		ClientID:       c.config.ClientID,
+		Name:           c.config.Name,
+		Version:        c.config.Version,
+		SupportedRoles: roles,
+			DeviceInfo:     &c.config.DeviceInfo,
+		
+		// Versioned fields (spec-compliant)
+		PlayerV1Support:     &c.config.PlayerV1Support,
+		ArtworkV1Support:    c.config.ArtworkV1Support,
+		VisualizerV1Support: c.config.VisualizerV1Support,
+		
+		// Legacy fields (Music Assistant compatibility) - CRITICAL!
+		PlayerSupport:     &legacyPlayerSupport,
+		MetadataSupport:   &legacyMetadataSupport,
+		ArtworkSupport:    c.config.ArtworkV1Support,
+		VisualizerSupport: c.config.VisualizerV1Support,
 	}
 
 	msg := protocol.Message{

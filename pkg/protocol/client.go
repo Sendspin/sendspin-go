@@ -121,16 +121,38 @@ func (c *Client) handshake() error {
 		roles = append(roles, "visualizer@v1")
 	}
 
+	// Create legacy PlayerSupport for Music Assistant compatibility
+	legacyPlayerSupport := PlayerSupport{
+		SupportedFormats:  c.config.PlayerV1Support.SupportedFormats,
+		BufferCapacity:    c.config.PlayerV1Support.BufferCapacity,
+		SupportedCommands: c.config.PlayerV1Support.SupportedCommands,
+	}
+
+	// Create legacy MetadataSupport for Music Assistant compatibility
+	legacyMetadataSupport := MetadataSupport{
+		SupportPictureFormats: []string{"jpeg", "png", "webp"},
+		MediaWidth:            600,
+		MediaHeight:           600,
+	}
+
 	// Send client/hello with versioned roles
 	hello := ClientHello{
-		ClientID:            c.config.ClientID,
-		Name:                c.config.Name,
-		Version:             c.config.Version,
-		SupportedRoles:      roles,
-		DeviceInfo:          &c.config.DeviceInfo,
+		ClientID:       c.config.ClientID,
+		Name:           c.config.Name,
+		Version:        c.config.Version,
+		SupportedRoles: roles,
+		DeviceInfo:     &c.config.DeviceInfo,
+		
+		// Versioned support (spec-compliant)
 		PlayerV1Support:     &c.config.PlayerV1Support,
 		ArtworkV1Support:    c.config.ArtworkV1Support,
 		VisualizerV1Support: c.config.VisualizerV1Support,
+		
+		// Legacy support (Music Assistant compatibility) - ADD THESE!
+		PlayerSupport:     &legacyPlayerSupport,
+		MetadataSupport:   &legacyMetadataSupport,
+		ArtworkSupport:    c.config.ArtworkV1Support,
+		VisualizerSupport: c.config.VisualizerV1Support,
 	}
 
 	msg := Message{
