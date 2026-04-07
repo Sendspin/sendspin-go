@@ -36,6 +36,8 @@ type AudioEngine struct {
 	// Audio source (file or test tone)
 	source AudioSource
 
+	sampleBuf []int32 // pre-allocated sample buffer reused each chunk
+
 	stopChan chan struct{}
 	stopOnce sync.Once // Ensure Stop() is only called once
 }
@@ -48,11 +50,16 @@ func NewAudioEngine(server *Server) (*AudioEngine, error) {
 		return nil, fmt.Errorf("failed to create audio source: %w", err)
 	}
 
+	// Pre-allocate sample buffer for the 20ms chunk generation loop
+	chunkSamples := (source.SampleRate() * ChunkDurationMs) / 1000
+	totalSamples := chunkSamples * source.Channels()
+
 	return &AudioEngine{
-		server:   server,
-		clients:  make(map[string]*Client),
-		source:   source,
-		stopChan: make(chan struct{}),
+		server:    server,
+		clients:   make(map[string]*Client),
+		source:    source,
+		sampleBuf: make([]int32, totalSamples),
+		stopChan:  make(chan struct{}),
 	}, nil
 }
 
@@ -240,12 +247,8 @@ func (e *AudioEngine) generateAndSendChunk() {
 	// Get current timestamp (buffer ahead time calculated per-client based on codec)
 	currentTime := e.server.getClockMicros()
 
-	// Calculate chunk size based on source sample rate
-	chunkSamples := (e.source.SampleRate() * ChunkDurationMs) / 1000
-	totalSamples := chunkSamples * e.source.Channels()
-
-	// Read audio samples from source (int32 for 24-bit support)
-	samples := make([]int32, totalSamples)
+	// Reuse pre-allocated sample buffer
+	samples := e.sampleBuf
 	n, err := e.source.Read(samples)
 	if err != nil {
 		log.Printf("Error reading audio source: %v", err)

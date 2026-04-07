@@ -15,16 +15,18 @@ import (
 
 // Output manages audio output
 type Output struct {
-	ctx        context.Context
-	cancel     context.CancelFunc
-	otoCtx     *oto.Context
-	player     *oto.Player
-	pipeReader *io.PipeReader
-	pipeWriter *io.PipeWriter
-	format     audio.Format
-	volume     int
-	muted      bool
-	ready      bool
+	ctx          context.Context
+	cancel       context.CancelFunc
+	otoCtx       *oto.Context
+	player       *oto.Player
+	pipeReader   *io.PipeReader
+	pipeWriter   *io.PipeWriter
+	format       audio.Format
+	volume       int
+	muted        bool
+	ready        bool
+	samples16Buf []int16 // reusable int16 conversion buffer
+	outputBuf    []byte  // reusable byte output buffer
 }
 
 // NewOutput creates an audio output
@@ -96,15 +98,23 @@ func (o *Output) Play(buf audio.Buffer) error {
 	// Apply volume to samples (int32 format)
 	samples := applyVolume(buf.Samples, o.volume, o.muted)
 
+	// Grow reusable buffers if needed
+	if len(samples) > len(o.samples16Buf) {
+		o.samples16Buf = make([]int16, len(samples))
+	}
+	byteLen := len(samples) * 2
+	if byteLen > len(o.outputBuf) {
+		o.outputBuf = make([]byte, byteLen)
+	}
+
 	// Convert int32 samples to int16 for PortAudio (oto uses 16-bit output)
-	// TODO: Add native 24-bit PortAudio support in the future
-	samples16 := make([]int16, len(samples))
+	samples16 := o.samples16Buf[:len(samples)]
 	for i, s := range samples {
 		samples16[i] = audio.SampleToInt16(s)
 	}
 
 	// Convert int16 samples to bytes for audio output
-	output := make([]byte, len(samples16)*2)
+	output := o.outputBuf[:byteLen]
 	for i, sample := range samples16 {
 		binary.LittleEndian.PutUint16(output[i*2:], uint16(sample))
 	}

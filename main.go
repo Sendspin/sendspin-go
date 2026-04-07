@@ -216,48 +216,31 @@ func statsUpdateLoop(player *sendspin.Player, updateTUI func(ui.StatusMsg)) {
 	ticker := time.NewTicker(500 * time.Millisecond)
 	defer ticker.Stop()
 
-	// Use a slower ticker for expensive runtime stats to avoid GC pauses
-	runtimeStatsTicker := time.NewTicker(2 * time.Second)
-	defer runtimeStatsTicker.Stop()
+	for range ticker.C {
+		stats := player.Stats()
 
-	var lastGoroutines int
-	var lastMemAlloc, lastMemSys uint64
-
-	for {
-		select {
-		case <-runtimeStatsTicker.C:
-			// Collect runtime stats less frequently (every 2 seconds)
-			var m runtime.MemStats
-			runtime.ReadMemStats(&m)
-			lastGoroutines = runtime.NumGoroutine()
-			lastMemAlloc = m.Alloc
-			lastMemSys = m.Sys
-
-		case <-ticker.C:
-			stats := player.Stats()
-
-			// Convert pkg/sync.Quality to internal/sync.Quality
-			var syncQuality internalsync.Quality
-			switch stats.SyncQuality {
-			case 0: // QualityGood
-				syncQuality = internalsync.QualityGood
-			case 1: // QualityDegraded
-				syncQuality = internalsync.QualityDegraded
-			case 2: // QualityLost
-				syncQuality = internalsync.QualityLost
-			}
-
-			updateTUI(ui.StatusMsg{
-				Received:    stats.Received,
-				Played:      stats.Played,
-				Dropped:     stats.Dropped,
-				BufferDepth: stats.BufferDepth,
-				SyncRTT:     stats.SyncRTT,
-				SyncQuality: syncQuality,
-				Goroutines:  lastGoroutines,
-				MemAlloc:    lastMemAlloc,
-				MemSys:      lastMemSys,
-			})
+		// Convert pkg/sync.Quality to internal/sync.Quality
+		var syncQuality internalsync.Quality
+		switch stats.SyncQuality {
+		case 0: // QualityGood
+			syncQuality = internalsync.QualityGood
+		case 1: // QualityDegraded
+			syncQuality = internalsync.QualityDegraded
+		case 2: // QualityLost
+			syncQuality = internalsync.QualityLost
 		}
+
+		// NumGoroutine is cheap; ReadMemStats removed to avoid stop-the-world pauses
+		updateTUI(ui.StatusMsg{
+			Received:    stats.Received,
+			Played:      stats.Played,
+			Dropped:     stats.Dropped,
+			BufferDepth: stats.BufferDepth,
+			SyncRTT:     stats.SyncRTT,
+			SyncQuality: syncQuality,
+			Goroutines:  runtime.NumGoroutine(),
+			MemAlloc:    0,
+			MemSys:      0,
+		})
 	}
 }
