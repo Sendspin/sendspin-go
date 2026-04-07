@@ -5,11 +5,15 @@ package discovery
 import (
 	"context"
 	"fmt"
+	"io"
 	"log"
 	"net"
 
 	"github.com/hashicorp/mdns"
 )
+
+// silentLogger discards hashicorp/mdns internal logs
+var silentLogger = log.New(io.Discard, "", 0)
 
 // Config holds discovery configuration
 type Config struct {
@@ -71,7 +75,7 @@ func (m *Manager) Advertise() error {
 		return fmt.Errorf("failed to create service: %w", err)
 	}
 
-	server, err := mdns.NewServer(&mdns.Config{Zone: service})
+	server, err := mdns.NewServer(&mdns.Config{Zone: service, Logger: silentLogger})
 	if err != nil {
 		return fmt.Errorf("failed to create mdns server: %w", err)
 	}
@@ -126,6 +130,7 @@ func (m *Manager) browseLoop() {
 			Domain:  "local",
 			Timeout: 3,
 			Entries: entries,
+			Logger:  silentLogger,
 		}
 
 		mdns.Query(params)
