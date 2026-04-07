@@ -1,8 +1,8 @@
 # Binaries
-sendspin-player
-sendspin-server
-resonate-player
-resonate-server
+/sendspin-player
+/sendspin-server
+/resonate-player
+/resonate-server
 test-sync
 *.exe
 *.dll
