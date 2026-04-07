@@ -1,9 +1,10 @@
 # Binaries
-sendspin-player
-sendspin-server
-resonate-player
-resonate-server
-test-sync
+/sendspin-player
+/sendspin-server
+/resonate-player
+/resonate-server
+/test-sync
+/ma-player
 *.exe
 *.dll
 *.so
@@ -35,4 +36,3 @@ output.txt
 sendspin-go
 resonate-go
 prompts/
-ma-player
