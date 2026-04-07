@@ -126,8 +126,10 @@ func (c *Client) handshake() error {
 	}
 
 	// Debug: Log the hello message
-	helloJSON, _ := json.MarshalIndent(msg, "", "  ")
-	log.Printf("Sending client/hello:\n%s", string(helloJSON))
+	helloJSON, err := json.MarshalIndent(msg, "", "  ")
+	if err == nil {
+		log.Printf("Sending client/hello:\n%s", string(helloJSON))
+	}
 
 	if err := c.sendJSON(msg); err != nil {
 		return fmt.Errorf("failed to send client/hello: %w", err)
@@ -241,12 +243,19 @@ func (c *Client) handleJSONMessage(data []byte) {
 	}
 
 	log.Printf("Received message type: %s", msg.Type)
-	payloadBytes, _ := json.Marshal(msg.Payload)
+	payloadBytes, err := json.Marshal(msg.Payload)
+	if err != nil {
+		log.Printf("Failed to marshal payload for %s: %v", msg.Type, err)
+		return
+	}
 
 	switch msg.Type {
 	case "server/command":
 		var cmd protocol.ServerCommand
-		json.Unmarshal(payloadBytes, &cmd)
+		if err := json.Unmarshal(payloadBytes, &cmd); err != nil {
+			log.Printf("Failed to parse server/command: %v", err)
+			return
+		}
 		select {
 		case c.ControlMsgs <- cmd:
 		case <-c.ctx.Done():
@@ -254,7 +263,10 @@ func (c *Client) handleJSONMessage(data []byte) {
 
 	case "server/time":
 		var timeMsg protocol.ServerTime
-		json.Unmarshal(payloadBytes, &timeMsg)
+		if err := json.Unmarshal(payloadBytes, &timeMsg); err != nil {
+			log.Printf("Failed to parse server/time: %v", err)
+			return
+		}
 		select {
 		case c.TimeSyncResp <- timeMsg:
 		case <-c.ctx.Done():
@@ -262,7 +274,10 @@ func (c *Client) handleJSONMessage(data []byte) {
 
 	case "stream/start":
 		var start protocol.StreamStart
-		json.Unmarshal(payloadBytes, &start)
+		if err := json.Unmarshal(payloadBytes, &start); err != nil {
+			log.Printf("Failed to parse stream/start: %v", err)
+			return
+		}
 		select {
 		case c.StreamStart <- start:
 		case <-c.ctx.Done():
@@ -270,7 +285,10 @@ func (c *Client) handleJSONMessage(data []byte) {
 
 	case "stream/metadata":
 		var meta protocol.StreamMetadata
-		json.Unmarshal(payloadBytes, &meta)
+		if err := json.Unmarshal(payloadBytes, &meta); err != nil {
+			log.Printf("Failed to parse stream/metadata: %v", err)
+			return
+		}
 		select {
 		case c.Metadata <- meta:
 		case <-c.ctx.Done():
