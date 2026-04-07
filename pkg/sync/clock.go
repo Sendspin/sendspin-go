@@ -1,5 +1,5 @@
-// ABOUTME: Clock synchronization with drift compensation
-// ABOUTME: Tracks both offset AND drift to handle clock frequency differences
+// ABOUTME: Clock synchronization using Kalman time filter
+// ABOUTME: Tracks offset and drift between client and server clocks
 package sync
 
 import (
@@ -8,15 +8,14 @@ import (
 	"time"
 )
 
-// ClockSync manages clock synchronization with drift compensation
+// ClockSync manages clock synchronization using a Kalman time filter.
 type ClockSync struct {
-	mu                  sync.RWMutex
-	serverLoopStartUnix int64 // Unix microseconds when server loop started
-	rtt                 int64 // Latest round-trip time
-	quality             Quality
-	lastSync            time.Time
-	sampleCount         int
-	synced              bool // True after first successful sync
+	mu          sync.RWMutex
+	filter      *TimeFilter
+	rtt         int64
+	quality     Quality
+	lastSync    time.Time
+	sampleCount int
 }
 
 // Quality represents sync quality
@@ -31,16 +30,14 @@ const (
 // NewClockSync creates a new clock synchronizer
 func NewClockSync() *ClockSync {
 	return &ClockSync{
+		filter:  NewTimeFilter(DefaultTimeFilterConfig()),
 		quality: QualityLost,
-		synced:  false,
 	}
 }
 
-// ProcessSyncResponse processes a server/time response
-// t1: client send (Unix µs)
-// t2: server receive (server loop µs)
-// t3: server send (server loop µs)
-// t4: client receive (Unix µs)
+// ProcessSyncResponse processes a server/time response.
+// t1: client send (Unix µs), t2: server receive (server µs),
+// t3: server send (server µs), t4: client receive (Unix µs)
 func (cs *ClockSync) ProcessSyncResponse(t1, t2, t3, t4 int64) {
 	rtt := (t4 - t1) - (t3 - t2)
 
@@ -56,19 +53,14 @@ func (cs *ClockSync) ProcessSyncResponse(t1, t2, t3, t4 int64) {
 		return
 	}
 
-	// On first successful sync, compute when the server loop started in Unix µs
-	// t2 is server_received (server loop µs), t4 is our Unix µs
-	if !cs.synced {
-		cs.serverLoopStartUnix = time.Now().UnixMicro() - t2
-		cs.synced = true
-		cs.quality = QualityGood
-		cs.sampleCount++
-		log.Printf("Clock sync established: serverLoopStart=%d, rtt=%dμs", cs.serverLoopStartUnix, rtt)
-		return
-	}
+	// NTP-style offset and uncertainty
+	measurement := ((t2 - t1) + (t3 - t4)) / 2
+	maxError := rtt / 2
+
+	cs.filter.Update(measurement, maxError, t4)
 
 	// Update quality based on RTT
-	if rtt < 50000 { // <50ms
+	if rtt < 50000 {
 		cs.quality = QualityGood
 	} else {
 		cs.quality = QualityDegraded
@@ -76,8 +68,10 @@ func (cs *ClockSync) ProcessSyncResponse(t1, t2, t3, t4 int64) {
 
 	cs.sampleCount++
 
-	if cs.sampleCount < 10 {
-		log.Printf("Sync #%d: rtt=%dμs, quality=%v", cs.sampleCount, rtt, cs.quality)
+	if cs.sampleCount <= 5 {
+		filterErr := cs.filter.GetError()
+		log.Printf("Sync #%d: rtt=%dμs, offset=%dμs, error=%dμs",
+			cs.sampleCount, rtt, measurement, filterErr)
 	}
 }
 
@@ -100,40 +94,35 @@ func (cs *ClockSync) CheckQuality() Quality {
 	return cs.quality
 }
 
-// ServerToLocalTime converts server timestamp (loop µs) to local wall clock time
+// ServerToLocalTime converts server timestamp (µs) to local wall clock time.
 func (cs *ClockSync) ServerToLocalTime(serverTime int64) time.Time {
 	cs.mu.RLock()
 	defer cs.mu.RUnlock()
 
-	// If we haven't synced yet, assume server time = client time
-	if !cs.synced {
+	if !cs.filter.Synced() {
 		return time.Unix(0, serverTime*1000)
 	}
 
-	// Convert server loop µs to Unix µs
-	unixMicros := cs.serverLoopStartUnix + serverTime
-
-	return time.UnixMicro(unixMicros)
+	// server→client conversion gives us client Unix µs
+	clientMicros := cs.filter.ComputeClientTime(serverTime)
+	return time.UnixMicro(clientMicros)
 }
 
-// ServerMicrosNow returns current time in server's reference frame (server loop µs)
+// ServerMicrosNow returns current time in server's reference frame (µs).
 func ServerMicrosNow() int64 {
 	cs := globalClockSync
 	if cs == nil {
-		// Before sync initialized, use raw client time
 		return time.Now().UnixMicro()
 	}
 
 	cs.mu.RLock()
 	defer cs.mu.RUnlock()
 
-	// If we haven't synced yet, return Unix time
-	if !cs.synced {
+	if !cs.filter.Synced() {
 		return time.Now().UnixMicro()
 	}
 
-	// Calculate server loop µs from current Unix time
-	return time.Now().UnixMicro() - cs.serverLoopStartUnix
+	return cs.filter.ComputeServerTime(time.Now().UnixMicro())
 }
 
 // SetGlobalClockSync sets the global clock sync instance
