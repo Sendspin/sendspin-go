@@ -20,12 +20,12 @@ jobs:
     - name: Set up Go
       uses: actions/setup-go@v5
       with:
-        go-version: '1.23'
+        go-version: '1.24'
 
     - name: Install dependencies
       run: |
         sudo apt-get update
-        sudo apt-get install -y libopus-dev libopusfile-dev libflac-dev portaudio19-dev
+        sudo apt-get install -y libopus-dev libopusfile-dev libasound2-dev
 
     - name: Cache Go modules
       uses: actions/cache@v4
@@ -53,9 +53,9 @@ jobs:
 
     - name: Build binaries
       run: |
-        go build -v -o resonate-player .
-        go build -v ./cmd/resonate-server
-        go build -v ./cmd/test-sync
+        go build -v -o sendspin-player .
+        go build -v -o ma-player ./cmd/ma-player
+        go build -v -o test-sync ./cmd/test-sync
 
   lint:
     name: Lint
@@ -68,12 +68,12 @@ jobs:
     - name: Set up Go
       uses: actions/setup-go@v5
       with:
-        go-version: '1.23'
+        go-version: '1.24'
 
     - name: Install dependencies
       run: |
         sudo apt-get update
-        sudo apt-get install -y libopus-dev libopusfile-dev libflac-dev portaudio19-dev
+        sudo apt-get install -y libopus-dev libopusfile-dev libasound2-dev
 
     - name: golangci-lint
       uses: golangci/golangci-lint-action@v6
@@ -92,15 +92,15 @@ jobs:
     - name: Set up Go
       uses: actions/setup-go@v5
       with:
-        go-version: '1.23'
+        go-version: '1.24'
 
     - name: Install dependencies
       run: |
         sudo apt-get update
-        sudo apt-get install -y libopus-dev libopusfile-dev libflac-dev portaudio19-dev
+        sudo apt-get install -y libopus-dev libopusfile-dev libasound2-dev
 
     - name: Build native binaries
       run: |
-        go build -v -o resonate-player .
-        go build -v -o resonate-server ./cmd/resonate-server
+        go build -v -o sendspin-player .
+        go build -v -o ma-player ./cmd/ma-player
         go build -v -o test-sync ./cmd/test-sync
