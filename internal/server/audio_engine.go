@@ -225,9 +225,6 @@ func (e *AudioEngine) negotiateCodec(client *Client) string {
 		if format.Codec == "opus" {
 			return "opus"
 		}
-		if format.Codec == "flac" {
-			return "flac"
-		}
 	}
 
 	// Default to PCM even if sample rate doesn't match perfectly
