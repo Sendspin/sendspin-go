@@ -63,6 +63,10 @@ func main() {
 		playerName = fmt.Sprintf("%s-sendspin-player", hostname)
 	}
 
+	// Handle shutdown signals early so discovery can use sigChan
+	sigChan := make(chan os.Signal, 1)
+	signal.Notify(sigChan, syscall.SIGINT, syscall.SIGTERM)
+
 	if !useTUI {
 		log.Printf("Starting Sendspin Player: %s", playerName)
 		log.Printf("TUI disabled - logging to file for debugging")
@@ -91,7 +95,7 @@ func main() {
 	// Handle server discovery if no manual server specified
 	var serverAddress string
 	if *serverAddr == "" {
-		log.Printf("Starting server discovery...")
+		log.Printf("Searching for servers via mDNS (press Ctrl+C to quit)...")
 		disc := discovery.NewManager(discovery.Config{
 			ServiceName: playerName,
 			Port:        *port,
@@ -99,13 +103,14 @@ func main() {
 		disc.Advertise()
 		disc.Browse()
 
-		// Wait for server discovery
+		// Wait for server discovery or shutdown
 		select {
 		case server := <-disc.Servers():
 			serverAddress = fmt.Sprintf("%s:%d", server.Host, server.Port)
 			log.Printf("Discovered server at %s", serverAddress)
-		case <-time.After(10 * time.Second):
-			log.Fatalf("No server found after 10 seconds")
+		case sig := <-sigChan:
+			log.Printf("Received %v during discovery, shutting down", sig)
+			return
 		}
 	} else {
 		serverAddress = *serverAddr
@@ -170,10 +175,6 @@ func main() {
 	if tuiProg != nil {
 		go statsUpdateLoop(player, updateTUI)
 	}
-
-	// Handle shutdown
-	sigChan := make(chan os.Signal, 1)
-	signal.Notify(sigChan, syscall.SIGINT, syscall.SIGTERM)
 
 	// Wait for quit signal from TUI or OS
 	if volumeCtrl != nil {
