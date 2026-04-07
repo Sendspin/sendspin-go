@@ -139,8 +139,10 @@ func (c *Client) handshake() error {
 	}
 
 	// Debug: Log the hello message
-	helloJSON, _ := json.MarshalIndent(msg, "", "  ")
-	log.Printf("Sending client/hello:\n%s", string(helloJSON))
+	helloJSON, err := json.MarshalIndent(msg, "", "  ")
+	if err == nil {
+		log.Printf("Sending client/hello:\n%s", string(helloJSON))
+	}
 
 	if err := c.sendJSON(msg); err != nil {
 		return fmt.Errorf("failed to send client/hello: %w", err)
@@ -260,7 +262,11 @@ func (c *Client) handleJSONMessage(data []byte) {
 		return
 	}
 
-	payloadBytes, _ := json.Marshal(msg.Payload)
+	payloadBytes, err := json.Marshal(msg.Payload)
+	if err != nil {
+		log.Printf("Failed to marshal payload for %s: %v", msg.Type, err)
+		return
+	}
 
 	switch msg.Type {
 	case "server/command":
