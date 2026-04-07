@@ -31,7 +31,7 @@ func main() {
 	useTUI := !(*noTUI || *streamLogs)
 
 	// Set up logging
-	f, err := os.OpenFile(*logFile, os.O_RDWR|os.O_CREATE|os.O_APPEND, 0666)
+	f, err := os.OpenFile(*logFile, os.O_RDWR|os.O_CREATE|os.O_APPEND, 0600)
 	if err != nil {
 		log.Fatalf("error opening log file: %v", err)
 	}

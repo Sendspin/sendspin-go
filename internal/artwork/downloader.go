@@ -8,9 +8,11 @@ import (
 	"io"
 	"log"
 	"net/http"
+	neturl "net/url"
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 )
 
 // Downloader manages artwork downloads
@@ -29,7 +31,7 @@ func NewDownloader() (*Downloader, error) {
 
 	return &Downloader{
 		cacheDir: cacheDir,
-		client:   &http.Client{},
+		client:   &http.Client{Timeout: 30 * time.Second},
 	}, nil
 }
 
@@ -37,6 +39,15 @@ func NewDownloader() (*Downloader, error) {
 func (d *Downloader) Download(url string) (string, error) {
 	if url == "" {
 		return "", nil
+	}
+
+	// Validate URL scheme to prevent SSRF
+	parsed, err := neturl.Parse(url)
+	if err != nil {
+		return "", fmt.Errorf("invalid artwork URL: %w", err)
+	}
+	if parsed.Scheme != "http" && parsed.Scheme != "https" {
+		return "", fmt.Errorf("unsupported URL scheme %q: only http and https are allowed", parsed.Scheme)
 	}
 
 	// Create a cache key from URL hash
@@ -71,7 +82,10 @@ func (d *Downloader) Download(url string) (string, error) {
 	}
 	defer f.Close()
 
-	if _, err := io.Copy(f, resp.Body); err != nil {
+	// Limit response body to 10MB to prevent resource exhaustion
+	limitedBody := io.LimitReader(resp.Body, 10*1024*1024)
+
+	if _, err := io.Copy(f, limitedBody); err != nil {
 		os.Remove(cachePath)
 		return "", fmt.Errorf("failed to save artwork: %w", err)
 	}

@@ -13,6 +13,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"github.com/hajimehoshi/go-mp3"
 	"github.com/mewkiz/flac"
@@ -355,8 +356,9 @@ type HTTPMP3Source struct {
 
 // NewHTTPMP3Source creates a new HTTP MP3 streaming source
 func NewHTTPMP3Source(url string) (*HTTPMP3Source, error) {
-	// Make HTTP GET request
-	resp, err := http.Get(url)
+	// Make HTTP GET request with timeout
+	client := &http.Client{Timeout: 30 * time.Second}
+	resp, err := client.Get(url)
 	if err != nil {
 		return nil, fmt.Errorf("failed to fetch HTTP stream: %w", err)
 	}
@@ -433,6 +435,11 @@ type FFmpegSource struct {
 // NewFFmpegSource creates a new ffmpeg-based audio source
 // Uses ffmpeg to decode HLS/m3u8 streams and output raw PCM
 func NewFFmpegSource(url string) (*FFmpegSource, error) {
+	// Validate URL scheme to prevent command injection
+	if !strings.HasPrefix(url, "http://") && !strings.HasPrefix(url, "https://") {
+		return nil, fmt.Errorf("unsupported URL scheme: only http and https are allowed")
+	}
+
 	// Check if ffmpeg is available
 	if _, err := exec.LookPath("ffmpeg"); err != nil {
 		return nil, fmt.Errorf("ffmpeg not found in PATH: %w (install with: brew install ffmpeg)", err)
