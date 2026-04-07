@@ -93,6 +93,8 @@ func (c *Client) Connect() error {
 	c.connected = true
 	c.mu.Unlock()
 
+	conn.SetReadLimit(1 << 20) // 1MB
+
 	// Perform handshake
 	if err := c.handshake(); err != nil {
 		c.Close()

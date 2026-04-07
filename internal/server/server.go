@@ -94,6 +94,7 @@ type Client struct {
 
 	// Output channel for messages
 	sendChan chan interface{}
+	done     chan struct{}
 
 	mu sync.RWMutex
 }
@@ -278,6 +279,7 @@ func (s *Server) handleWebSocket(w http.ResponseWriter, r *http.Request) {
 // handleConnection manages a client connection
 func (s *Server) handleConnection(conn *websocket.Conn) {
 	defer conn.Close()
+	conn.SetReadLimit(1 << 20) // 1MB
 
 	// Check if server is shutting down
 	s.shutdownMu.RLock()
@@ -332,6 +334,10 @@ func (s *Server) handleConnection(conn *websocket.Conn) {
 		log.Printf("Client hello missing Name")
 		return
 	}
+	if len(hello.ClientID) > 256 || len(hello.Name) > 256 || len(hello.SupportedRoles) > 20 {
+		log.Printf("Client hello fields exceed size limits")
+		return
+	}
 
 	log.Printf("Client hello: %s (ID: %s, Roles: %v)", hello.Name, hello.ClientID, hello.SupportedRoles)
 
@@ -346,6 +352,7 @@ func (s *Server) handleConnection(conn *websocket.Conn) {
 		Volume:       100,
 		Muted:        false,
 		sendChan:     make(chan interface{}, 100),
+		done:         make(chan struct{}),
 	}
 
 	// Check for duplicate client ID and register atomically
@@ -379,7 +386,7 @@ func (s *Server) handleConnection(conn *websocket.Conn) {
 		s.clientsMu.Lock()
 		delete(s.clients, client.ID)
 		s.clientsMu.Unlock()
-		close(client.sendChan)
+		close(client.done)
 		log.Printf("Client disconnected: %s", client.Name)
 
 		// Update TUI after client disconnect
@@ -434,22 +441,16 @@ func (s *Server) clientWriter(client *Client) {
 
 	for {
 		select {
-		case msg, ok := <-client.sendChan:
-			if !ok {
-				return
-			}
-
+		case msg := <-client.sendChan:
 			// Determine message type
 			switch v := msg.(type) {
 			case []byte:
-				// Binary message
 				client.Conn.SetWriteDeadline(time.Now().Add(writeDeadline))
 				if err := client.Conn.WriteMessage(websocket.BinaryMessage, v); err != nil {
 					log.Printf("Error writing binary message: %v", err)
 					return
 				}
 			default:
-				// JSON message
 				data, err := json.Marshal(v)
 				if err != nil {
 					log.Printf("Error marshaling message: %v", err)
@@ -463,10 +464,12 @@ func (s *Server) clientWriter(client *Client) {
 			}
 
 		case <-ticker.C:
-			// Send ping
 			if err := client.Conn.WriteControl(websocket.PingMessage, []byte{}, time.Now().Add(10*time.Second)); err != nil {
 				return
 			}
+
+		case <-client.done:
+			return
 		}
 	}
 }

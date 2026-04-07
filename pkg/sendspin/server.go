@@ -108,6 +108,7 @@ type client struct {
 
 	// Output channel for messages
 	sendChan chan interface{}
+	done     chan struct{}
 
 	mu sync.RWMutex
 }
@@ -368,6 +369,7 @@ func (s *Server) handleWebSocket(w http.ResponseWriter, r *http.Request) {
 // handleConnection manages a client connection
 func (s *Server) handleConnection(conn *websocket.Conn) {
 	defer conn.Close()
+	conn.SetReadLimit(1 << 20) // 1MB
 
 	// Check if server is shutting down
 	s.shutdownMu.RLock()
@@ -413,6 +415,10 @@ func (s *Server) handleConnection(conn *websocket.Conn) {
 		log.Printf("Client hello missing required fields")
 		return
 	}
+	if len(hello.ClientID) > 256 || len(hello.Name) > 256 || len(hello.SupportedRoles) > 20 {
+		log.Printf("Client hello fields exceed size limits")
+		return
+	}
 
 	log.Printf("Client hello: %s (ID: %s, Roles: %v)", hello.Name, hello.ClientID, hello.SupportedRoles)
 
@@ -427,6 +433,7 @@ func (s *Server) handleConnection(conn *websocket.Conn) {
 		Volume:       100,
 		Muted:        false,
 		sendChan:     make(chan interface{}, 100),
+		done:         make(chan struct{}),
 	}
 
 	// Check for duplicate and register
@@ -494,11 +501,7 @@ func (s *Server) clientWriter(c *client) {
 
 	for {
 		select {
-		case msg, ok := <-c.sendChan:
-			if !ok {
-				return
-			}
-
+		case msg := <-c.sendChan:
 			switch v := msg.(type) {
 			case []byte:
 				c.Conn.SetWriteDeadline(time.Now().Add(writeDeadline))
@@ -520,6 +523,9 @@ func (s *Server) clientWriter(c *client) {
 			if err := c.Conn.WriteControl(websocket.PingMessage, []byte{}, time.Now().Add(10*time.Second)); err != nil {
 				return
 			}
+
+		case <-c.done:
+			return
 		}
 	}
 }
@@ -692,7 +698,7 @@ func (s *Server) removeClient(c *client) {
 	c.mu.Unlock()
 
 	delete(s.clients, c.ID)
-	close(c.sendChan)
+	close(c.done)
 }
 
 // strPtr returns a pointer to the given string
