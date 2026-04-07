@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"log"
 	"net/http"
+	"strings"
 	"sync"
 	"time"
 
@@ -395,9 +396,11 @@ func (s *Server) handleConnection(conn *websocket.Conn) {
 
 	// Send server/hello
 	serverHello := protocol.ServerHello{
-		ServerID: s.serverID,
-		Name:     s.config.Name,
-		Version:  ProtocolVersion,
+		ServerID:         s.serverID,
+		Name:             s.config.Name,
+		Version:          ProtocolVersion,
+		ActiveRoles:      s.activateRoles(hello.SupportedRoles),
+		ConnectionReason: "playback",
 	}
 
 	if err := s.sendMessage(client, "server/hello", serverHello); err != nil {
@@ -603,14 +606,41 @@ func (s *Server) getClockMicros() int64 {
 	return time.Since(s.clockStart).Microseconds()
 }
 
-// hasRole checks if a client has a specific role
+// hasRole checks if a client has a specific role (handles versioned roles)
 func (s *Server) hasRole(client *Client, role string) bool {
 	for _, r := range client.Roles {
-		if r == role {
+		if r == role || strings.HasPrefix(r, role+"@") {
 			return true
 		}
 	}
 	return false
+}
+
+// activateRoles returns the active roles based on client's supported roles.
+// Only activates roles that this server actually implements.
+// Preserves input order (first occurrence of each role family).
+func (s *Server) activateRoles(supportedRoles []string) []string {
+	seen := make(map[string]bool)
+	result := make([]string, 0, len(supportedRoles))
+
+	for _, role := range supportedRoles {
+		family := role
+		if idx := strings.Index(role, "@"); idx > 0 {
+			family = role[:idx]
+		}
+
+		if seen[family] {
+			continue
+		}
+
+		switch family {
+		case "player", "metadata":
+			seen[family] = true
+			result = append(result, role)
+		}
+	}
+
+	return result
 }
 
 // CreateAudioChunk creates a binary audio chunk message

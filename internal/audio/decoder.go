@@ -119,7 +119,7 @@ func (d *FLACDecoder) Decode(data []byte) ([]int32, error) {
 	// For streaming FLAC, we need to handle frame-by-frame decoding
 	// This is a simplified implementation
 	// In production, would use mewkiz/flac's streaming API
-	return nil, fmt.Errorf("FLAC streaming not yet implemented")
+	return nil, fmt.Errorf("FLAC streaming decode not implemented")
 }
 
 func (d *FLACDecoder) Close() error {

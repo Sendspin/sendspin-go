@@ -723,11 +723,8 @@ func (s *Server) negotiateCodec(c *client) string {
 
 	// Consider compressed codecs
 	for _, format := range c.Capabilities.SupportedFormats {
-		if format.Codec == "opus" && sourceRate == 48000 {
+		if format.Codec == "opus" {
 			return "opus"
-		}
-		if format.Codec == "flac" {
-			return "flac"
 		}
 	}
 

@@ -67,9 +67,11 @@ type VisualizerSupport struct {
 
 // ServerHello is the server's response to client/hello
 type ServerHello struct {
-	ServerID string `json:"server_id"`
-	Name     string `json:"name"`
-	Version  int    `json:"version"`
+	ServerID         string   `json:"server_id"`
+	Name             string   `json:"name"`
+	Version          int      `json:"version"`
+	ActiveRoles      []string `json:"active_roles"`
+	ConnectionReason string   `json:"connection_reason"`
 }
 
 // ClientState reports the player's current state (sent as client/state message)
