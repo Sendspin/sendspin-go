@@ -3,6 +3,7 @@
 package sendspin
 
 import (
+	"fmt"
 	"math"
 	"sync"
 )
@@ -101,5 +102,5 @@ type FileSource struct {
 func NewFileSource(path string) (AudioSource, error) {
 	// For now, we use the internal implementation
 	// TODO: Migrate file sources to pkg/audio/decode
-	return nil, nil
+	return nil, fmt.Errorf("file source not implemented: use internal/server.NewAudioSource()")
 }

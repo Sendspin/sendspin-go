@@ -14,7 +14,6 @@ linters:
     - goimports
     - misspell
   disable:
-    - errcheck
     - staticcheck
 
 linters-settings:
