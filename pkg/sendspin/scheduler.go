@@ -7,6 +7,7 @@ import (
 	"context"
 	"log"
 	gosync "sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/Sendspin/sendspin-go/pkg/audio"
@@ -25,8 +26,9 @@ type Scheduler struct {
 	buffering    bool
 	bufferTarget int // Number of chunks to buffer before starting playback
 
-	stats   SchedulerStats
-	statsMu gosync.RWMutex
+	received atomic.Int64
+	played   atomic.Int64
+	dropped  atomic.Int64
 }
 
 // SchedulerStats tracks scheduler metrics
@@ -65,10 +67,7 @@ func (s *Scheduler) Schedule(buf audio.Buffer) {
 	// Convert server timestamp to local play time
 	buf.PlayAt = s.clockSync.ServerToLocalTime(buf.Timestamp)
 
-	s.statsMu.Lock()
-	received := s.stats.Received
-	s.stats.Received++
-	s.statsMu.Unlock()
+	received := s.received.Add(1) - 1
 
 	// Sanity logs for first 5 chunks showing timing
 	if received < 5 {
@@ -129,9 +128,7 @@ func (s *Scheduler) processQueue() {
 		} else if delay < -50*time.Millisecond {
 			// Too late (>50ms), drop
 			heap.Pop(s.bufferQ)
-			s.statsMu.Lock()
-			s.stats.Dropped++
-			s.statsMu.Unlock()
+			s.dropped.Add(1)
 			log.Printf("Dropped late buffer: %v late", -delay)
 		} else {
 			// Ready to play (within ±50ms window)
@@ -141,9 +138,7 @@ func (s *Scheduler) processQueue() {
 
 			select {
 			case s.output <- buf:
-				s.statsMu.Lock()
-				s.stats.Played++
-				s.statsMu.Unlock()
+				s.played.Add(1)
 			case <-s.ctx.Done():
 				return
 			}
@@ -163,9 +158,11 @@ func (s *Scheduler) Output() <-chan audio.Buffer {
 
 // Stats returns scheduler statistics
 func (s *Scheduler) Stats() SchedulerStats {
-	s.statsMu.RLock()
-	defer s.statsMu.RUnlock()
-	return s.stats
+	return SchedulerStats{
+		Received: s.received.Load(),
+		Played:   s.played.Load(),
+		Dropped:  s.dropped.Load(),
+	}
 }
 
 // BufferDepth returns the current buffer queue depth in milliseconds

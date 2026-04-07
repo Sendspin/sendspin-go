@@ -11,8 +11,9 @@ import (
 
 // OpusDecoder decodes Opus audio
 type OpusDecoder struct {
-	decoder *opus.Decoder
-	format  audio.Format
+	decoder  *opus.Decoder
+	format   audio.Format
+	pcm16Buf []int16 // reusable decode buffer to avoid per-frame allocation
 }
 
 // NewOpus creates a new Opus decoder
@@ -27,27 +28,25 @@ func NewOpus(format audio.Format) (Decoder, error) {
 	}
 
 	return &OpusDecoder{
-		decoder: dec,
-		format:  format,
+		decoder:  dec,
+		format:   format,
+		pcm16Buf: make([]int16, 5760*format.Channels),
 	}, nil
 }
 
 // Decode converts Opus bytes to int32 samples
 func (d *OpusDecoder) Decode(data []byte) ([]int32, error) {
-	// Opus decoder outputs to int16 buffer
-	pcmSize := 5760 * d.format.Channels // Max frame size
-	pcm16 := make([]int16, pcmSize)
-
-	n, err := d.decoder.Decode(data, pcm16)
+	// Reuse pre-allocated int16 buffer for decode (avoids 23KB alloc per frame)
+	n, err := d.decoder.Decode(data, d.pcm16Buf)
 	if err != nil {
 		return nil, fmt.Errorf("opus decode failed: %w", err)
 	}
 
-	// Convert int16 to int32 (Opus is always 16-bit)
+	// Convert int16 to int32 (caller owns the returned slice)
 	actualSamples := n * d.format.Channels
 	pcm32 := make([]int32, actualSamples)
 	for i := 0; i < actualSamples; i++ {
-		pcm32[i] = audio.SampleFromInt16(pcm16[i])
+		pcm32[i] = audio.SampleFromInt16(d.pcm16Buf[i])
 	}
 	return pcm32, nil
 }

@@ -15,6 +15,8 @@ type OpusEncoder struct {
 	sampleRate int
 	channels   int
 	frameSize  int
+	pcmBuf     []int16 // reusable conversion buffer
+	outBuf     []byte  // reusable encode output buffer
 }
 
 // NewOpus creates a new Opus encoder
@@ -36,25 +38,32 @@ func NewOpus(format audio.Format) (Encoder, error) {
 		sampleRate: format.SampleRate,
 		channels:   format.Channels,
 		frameSize:  frameSize,
+		pcmBuf:     make([]int16, frameSize*format.Channels),
+		outBuf:     make([]byte, 4000),
 	}, nil
 }
 
 // Encode converts int32 samples to Opus bytes
 func (e *OpusEncoder) Encode(samples []int32) ([]byte, error) {
-	// Convert int32 to int16 for Opus
-	pcm := make([]int16, len(samples))
+	// Grow pcmBuf if needed
+	if len(samples) > len(e.pcmBuf) {
+		e.pcmBuf = make([]int16, len(samples))
+	}
+
+	// Convert int32 to int16 for Opus using pre-allocated buffer
+	pcm := e.pcmBuf[:len(samples)]
 	for i, sample := range samples {
 		pcm[i] = audio.SampleToInt16(sample)
 	}
 
-	// Encode to Opus
-	data := make([]byte, 4000) // Max Opus packet size
-	n, err := e.encoder.Encode(pcm, data)
+	// Encode to Opus using pre-allocated output buffer
+	n, err := e.encoder.Encode(pcm, e.outBuf)
 	if err != nil {
 		return nil, fmt.Errorf("opus encode error: %w", err)
 	}
 
-	return data[:n], nil
+	// Return a copy since caller owns the result
+	return append([]byte(nil), e.outBuf[:n]...), nil
 }
 
 // Close releases resources
