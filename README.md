@@ -1,6 +1,3 @@
-> [!IMPORTANT]
-> This is a very early proof of concept of the Sendspin protocol. The protocol will likely change. This does work today (10/26), but may not work tomorrow.
-
 # Sendspin Go
 
 A complete Sendspin Protocol implementation in Go, featuring both server and player components for synchronized multi-room audio streaming.
