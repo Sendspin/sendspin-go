@@ -108,6 +108,19 @@ func (cs *ClockSync) ServerToLocalTime(serverTime int64) time.Time {
 	return time.UnixMicro(clientMicros)
 }
 
+// ServerMicrosNow returns current time in server's reference frame (us).
+// This is the instance method equivalent of the deprecated package-level ServerMicrosNow().
+func (cs *ClockSync) ServerMicrosNow() int64 {
+	cs.mu.RLock()
+	defer cs.mu.RUnlock()
+
+	if !cs.filter.Synced() {
+		return time.Now().UnixMicro()
+	}
+
+	return cs.filter.ComputeServerTime(time.Now().UnixMicro())
+}
+
 // ServerMicrosNow returns current time in server's reference frame (µs).
 func ServerMicrosNow() int64 {
 	cs := globalClockSync
