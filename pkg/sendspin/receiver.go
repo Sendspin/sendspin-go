@@ -6,11 +6,13 @@ import (
 	"context"
 	"fmt"
 	"log"
+	"time"
 
 	"github.com/Sendspin/sendspin-go/pkg/audio"
 	"github.com/Sendspin/sendspin-go/pkg/audio/decode"
 	"github.com/Sendspin/sendspin-go/pkg/protocol"
 	"github.com/Sendspin/sendspin-go/pkg/sync"
+	"github.com/google/uuid"
 )
 
 // ReceiverConfig configures a Receiver
@@ -120,6 +122,142 @@ func (r *Receiver) Stats() ReceiverStats {
 	}
 
 	return stats
+}
+
+// Connect establishes a connection to the server, performs initial clock sync,
+// and starts background goroutines for connection watching and clock sync.
+func (r *Receiver) Connect() error {
+	clientID := uuid.New().String()
+
+	clientConfig := protocol.Config{
+		ServerAddr: r.serverAddr,
+		ClientID:   clientID,
+		Name:       r.config.PlayerName,
+		Version:    1,
+		DeviceInfo: protocol.DeviceInfo{
+			ProductName:     r.config.DeviceInfo.ProductName,
+			Manufacturer:    r.config.DeviceInfo.Manufacturer,
+			SoftwareVersion: r.config.DeviceInfo.SoftwareVersion,
+		},
+		PlayerV1Support: protocol.PlayerV1Support{
+			SupportedFormats: []protocol.AudioFormat{
+				{Codec: "pcm", Channels: 2, SampleRate: 192000, BitDepth: 24},
+				{Codec: "pcm", Channels: 2, SampleRate: 176400, BitDepth: 24},
+				{Codec: "pcm", Channels: 2, SampleRate: 96000, BitDepth: 24},
+				{Codec: "pcm", Channels: 2, SampleRate: 88200, BitDepth: 24},
+				{Codec: "pcm", Channels: 2, SampleRate: 48000, BitDepth: 16},
+				{Codec: "pcm", Channels: 2, SampleRate: 44100, BitDepth: 16},
+				{Codec: "opus", Channels: 2, SampleRate: 48000, BitDepth: 16},
+			},
+			BufferCapacity:    1048576,
+			SupportedCommands: []string{"volume", "mute"},
+		},
+		ArtworkV1Support: &protocol.ArtworkV1Support{
+			Channels: []protocol.ArtworkChannel{
+				{Source: "album", Format: "jpeg", MediaWidth: 600, MediaHeight: 600},
+			},
+		},
+		VisualizerV1Support: &protocol.VisualizerV1Support{
+			BufferCapacity: 1048576,
+		},
+	}
+
+	r.client = protocol.NewClient(clientConfig)
+
+	if err := r.client.Connect(); err != nil {
+		return fmt.Errorf("connection failed: %w", err)
+	}
+
+	log.Printf("Connected to server: %s", r.serverAddr)
+	r.connected = true
+
+	if err := r.performInitialSync(); err != nil {
+		log.Printf("Initial clock sync failed: %v", err)
+	}
+
+	go r.watchConnection()
+	go r.clockSyncLoop()
+
+	return nil
+}
+
+// watchConnection monitors the protocol client and cancels the receiver context
+// if the connection is lost, ensuring all goroutines exit cleanly.
+func (r *Receiver) watchConnection() {
+	select {
+	case <-r.client.Done():
+		log.Printf("Server connection lost, shutting down receiver")
+		r.connected = false
+		r.notifyError(fmt.Errorf("server connection lost"))
+		r.cancel()
+	case <-r.ctx.Done():
+		return
+	}
+}
+
+// performInitialSync does multiple sync rounds before audio starts.
+func (r *Receiver) performInitialSync() error {
+	log.Printf("Performing initial clock synchronization...")
+
+	for i := 0; i < 5; i++ {
+		t1 := time.Now().UnixMicro()
+		r.client.SendTimeSync(t1)
+
+		select {
+		case resp := <-r.client.TimeSyncResp:
+			t4 := time.Now().UnixMicro()
+			r.clockSync.ProcessSyncResponse(resp.ClientTransmitted, resp.ServerReceived, resp.ServerTransmitted, t4)
+		case <-time.After(500 * time.Millisecond):
+			log.Printf("Initial sync round %d timeout", i+1)
+		}
+
+		time.Sleep(100 * time.Millisecond)
+	}
+
+	rtt, quality := r.clockSync.GetStats()
+	log.Printf("Initial clock sync complete: rtt=%dus, quality=%v", rtt, quality)
+
+	return nil
+}
+
+// clockSyncLoop continuously syncs the clock with the server.
+func (r *Receiver) clockSyncLoop() {
+	ticker := time.NewTicker(1 * time.Second)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-ticker.C:
+			for {
+				select {
+				case <-r.client.TimeSyncResp:
+					log.Printf("Discarded stale time sync response")
+				default:
+					goto sendRequest
+				}
+			}
+
+		sendRequest:
+			t1 := time.Now().UnixMicro()
+			r.client.SendTimeSync(t1)
+
+		case resp := <-r.client.TimeSyncResp:
+			t4 := time.Now().UnixMicro()
+			r.clockSync.ProcessSyncResponse(resp.ClientTransmitted, resp.ServerReceived, resp.ServerTransmitted, t4)
+
+		case <-r.ctx.Done():
+			return
+		}
+	}
+}
+
+// notifyError calls the OnError callback if set, otherwise logs the error.
+func (r *Receiver) notifyError(err error) {
+	if r.config.OnError != nil {
+		r.config.OnError(err)
+	} else {
+		log.Printf("Receiver error: %v", err)
+	}
 }
 
 // Close shuts down the Receiver, releasing all resources.

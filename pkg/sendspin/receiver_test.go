@@ -65,6 +65,18 @@ func TestNewReceiver_RequiresServerAddr(t *testing.T) {
 	}
 }
 
+func TestReceiver_Connect_BadAddress(t *testing.T) {
+	recv, _ := NewReceiver(ReceiverConfig{
+		ServerAddr: "localhost:99999",
+		PlayerName: "Test",
+	})
+
+	err := recv.Connect()
+	if err == nil {
+		t.Fatal("expected connection error for bad address")
+	}
+}
+
 func TestReceiver_ClockSyncIsOwnInstance(t *testing.T) {
 	config1 := ReceiverConfig{
 		ServerAddr: "localhost:8927",
