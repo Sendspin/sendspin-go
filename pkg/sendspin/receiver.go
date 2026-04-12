@@ -177,8 +177,197 @@ func (r *Receiver) Connect() error {
 
 	go r.watchConnection()
 	go r.clockSyncLoop()
+	go r.handleStreamStart()
+	go r.handleStreamClear()
+	go r.handleStreamEnd()
+	go r.handleAudioChunks()
+	go r.handleServerState()
+	go r.handleGroupUpdates()
 
 	return nil
+}
+
+func (r *Receiver) handleStreamStart() {
+	for {
+		select {
+		case start := <-r.client.StreamStart:
+			if start.Player == nil {
+				log.Printf("Received stream/start with no player info")
+				continue
+			}
+
+			log.Printf("Stream starting: %s %dHz %dch %dbit",
+				start.Player.Codec, start.Player.SampleRate, start.Player.Channels, start.Player.BitDepth)
+
+			format := audio.Format{
+				Codec:      start.Player.Codec,
+				SampleRate: start.Player.SampleRate,
+				Channels:   start.Player.Channels,
+				BitDepth:   start.Player.BitDepth,
+			}
+
+			var decoder decode.Decoder
+			var err error
+
+			if r.config.DecoderFactory != nil {
+				decoder, err = r.config.DecoderFactory(format)
+			} else {
+				decoder, err = r.defaultDecoder(format)
+			}
+
+			if err != nil {
+				r.notifyError(fmt.Errorf("failed to create decoder: %w", err))
+				continue
+			}
+			r.decoder = decoder
+			r.format = format
+
+			if r.config.OnStreamStart != nil {
+				r.config.OnStreamStart(format)
+			}
+
+			if r.schedulerCancel != nil {
+				r.schedulerCancel()
+			}
+			if r.scheduler != nil {
+				r.scheduler.Stop()
+			}
+
+			r.schedulerCtx, r.schedulerCancel = context.WithCancel(r.ctx)
+			r.scheduler = NewScheduler(r.clockSync, r.config.BufferMs)
+			go r.scheduler.Run()
+			go r.pumpSchedulerOutput(r.schedulerCtx)
+
+		case <-r.ctx.Done():
+			return
+		}
+	}
+}
+
+func (r *Receiver) defaultDecoder(format audio.Format) (decode.Decoder, error) {
+	switch format.Codec {
+	case "pcm":
+		return decode.NewPCM(format)
+	case "opus":
+		return decode.NewOpus(format)
+	case "flac":
+		return decode.NewFLAC(format)
+	default:
+		return nil, fmt.Errorf("unsupported codec: %s", format.Codec)
+	}
+}
+
+func (r *Receiver) handleAudioChunks() {
+	for {
+		select {
+		case chunk := <-r.client.AudioChunks:
+			if r.decoder == nil || r.scheduler == nil {
+				continue
+			}
+
+			pcm, err := r.decoder.Decode(chunk.Data)
+			if err != nil {
+				r.notifyError(fmt.Errorf("decode error: %w", err))
+				continue
+			}
+
+			buf := audio.Buffer{
+				Timestamp: chunk.Timestamp,
+				Samples:   pcm,
+				Format:    r.format,
+			}
+			r.scheduler.Schedule(buf)
+
+		case <-r.ctx.Done():
+			return
+		}
+	}
+}
+
+func (r *Receiver) pumpSchedulerOutput(ctx context.Context) {
+	for {
+		select {
+		case buf := <-r.scheduler.Output():
+			select {
+			case r.output <- buf:
+			case <-ctx.Done():
+				return
+			}
+		case <-ctx.Done():
+			return
+		}
+	}
+}
+
+func (r *Receiver) handleStreamClear() {
+	for {
+		select {
+		case clear := <-r.client.StreamClear:
+			log.Printf("Stream clear received for roles: %v", clear.Roles)
+			if len(clear.Roles) == 0 || containsRole(clear.Roles, "player") {
+				if r.scheduler != nil {
+					r.scheduler.Clear()
+				}
+			}
+		case <-r.ctx.Done():
+			return
+		}
+	}
+}
+
+func (r *Receiver) handleStreamEnd() {
+	for {
+		select {
+		case end := <-r.client.StreamEnd:
+			log.Printf("Stream end received for roles: %v", end.Roles)
+			if len(end.Roles) == 0 || containsRole(end.Roles, "player") {
+				if r.config.OnStreamEnd != nil {
+					r.config.OnStreamEnd()
+				}
+			}
+		case <-r.ctx.Done():
+			return
+		}
+	}
+}
+
+func (r *Receiver) handleServerState() {
+	for {
+		select {
+		case state := <-r.client.ServerState:
+			if state.Metadata != nil && r.config.OnMetadata != nil {
+				meta := state.Metadata
+				r.config.OnMetadata(Metadata{
+					Title:       derefString(meta.Title),
+					Artist:      derefString(meta.Artist),
+					Album:       derefString(meta.Album),
+					AlbumArtist: derefString(meta.AlbumArtist),
+					ArtworkURL:  derefString(meta.ArtworkURL),
+					Track:       derefInt(meta.Track),
+					Year:        derefInt(meta.Year),
+					Duration:    getDurationSeconds(meta.Progress),
+				})
+			}
+		case <-r.ctx.Done():
+			return
+		}
+	}
+}
+
+func (r *Receiver) handleGroupUpdates() {
+	for {
+		select {
+		case update := <-r.client.GroupUpdate:
+			if update.PlaybackState != nil {
+				log.Printf("Group playback state: %s", *update.PlaybackState)
+			}
+			if update.GroupID != nil {
+				log.Printf("Joined group: %s", *update.GroupID)
+			}
+		case <-r.ctx.Done():
+			return
+		}
+	}
 }
 
 // watchConnection monitors the protocol client and cancels the receiver context
