@@ -420,6 +420,11 @@ func (c *Client) Close() {
 	}
 }
 
+// Done returns a channel that is closed when the client connection is lost.
+func (c *Client) Done() <-chan struct{} {
+	return c.ctx.Done()
+}
+
 // IsConnected returns connection status
 func (c *Client) IsConnected() bool {
 	c.mu.RLock()

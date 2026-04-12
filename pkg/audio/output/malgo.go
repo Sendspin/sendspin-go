@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"log"
 	"sync"
+	"time"
 
 	"github.com/Sendspin/sendspin-go/pkg/audio"
 	"github.com/gen2brain/malgo"
@@ -196,26 +197,35 @@ func (m *Malgo) Open(sampleRate, channels, bitDepth int) error {
 	return nil
 }
 
-// Write queues audio samples for playback
+// Write queues audio samples for playback.
+// Blocks briefly if the ring buffer is full, waiting for the audio callback
+// to drain space. Returns an error if samples are dropped after the timeout.
 func (m *Malgo) Write(samples []int32) error {
 	if !m.ready {
 		return fmt.Errorf("output not initialized")
 	}
 
+	const (
+		retryInterval = 1 * time.Millisecond
+		maxWait       = 50 * time.Millisecond
+	)
+
 	// Apply volume and mute
 	volumedSamples := applyVolume(samples, m.volume, m.muted)
 
-	// Write to ring buffer (blocks if full)
 	written := 0
+	waited := time.Duration(0)
 	for written < len(volumedSamples) {
 		n := m.ringBuffer.Write(volumedSamples[written:])
 		written += n
 
-		// If buffer is full, yield briefly
-		if n == 0 {
-			// Buffer is full, this will naturally throttle the writer
-			// In practice, the callback drains the buffer continuously
-			break
+		if written < len(volumedSamples) {
+			if waited >= maxWait {
+				dropped := len(volumedSamples) - written
+				return fmt.Errorf("ring buffer full, dropped %d samples after %v", dropped, maxWait)
+			}
+			time.Sleep(retryInterval)
+			waited += retryInterval
 		}
 	}
 
