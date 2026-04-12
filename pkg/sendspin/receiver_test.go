@@ -2,7 +2,11 @@
 package sendspin
 
 import (
+	"fmt"
 	"testing"
+
+	"github.com/Sendspin/sendspin-go/pkg/audio"
+	"github.com/Sendspin/sendspin-go/pkg/audio/decode"
 )
 
 func TestNewReceiver_Defaults(t *testing.T) {
@@ -101,5 +105,68 @@ func TestReceiver_ClockSyncIsOwnInstance(t *testing.T) {
 
 	if r1.ClockSync() == r2.ClockSync() {
 		t.Error("Expected each Receiver to have its own ClockSync instance")
+	}
+}
+
+func TestReceiver_CloseBeforeConnect(t *testing.T) {
+	recv, _ := NewReceiver(ReceiverConfig{
+		ServerAddr: "localhost:8927",
+		PlayerName: "Test",
+	})
+
+	// Should not panic
+	err := recv.Close()
+	if err != nil {
+		t.Fatalf("unexpected error closing unconnected receiver: %v", err)
+	}
+}
+
+func TestReceiver_StatsBeforeConnect(t *testing.T) {
+	recv, _ := NewReceiver(ReceiverConfig{
+		ServerAddr: "localhost:8927",
+		PlayerName: "Test",
+	})
+
+	stats := recv.Stats()
+	if stats.Received != 0 || stats.Played != 0 || stats.Dropped != 0 {
+		t.Error("expected zero stats before connect")
+	}
+}
+
+func TestReceiver_OnStreamStartCallback(t *testing.T) {
+	var receivedFormat audio.Format
+	_, err := NewReceiver(ReceiverConfig{
+		ServerAddr: "localhost:8927",
+		PlayerName: "Test",
+		OnStreamStart: func(f audio.Format) {
+			receivedFormat = f
+		},
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	// Callback is stored but not invoked until stream starts
+	if receivedFormat.Codec != "" {
+		t.Error("expected empty format before stream start")
+	}
+}
+
+func TestReceiver_CustomDecoderFactory(t *testing.T) {
+	factoryCalled := false
+	recv, _ := NewReceiver(ReceiverConfig{
+		ServerAddr: "localhost:8927",
+		PlayerName: "Test",
+		DecoderFactory: func(f audio.Format) (decode.Decoder, error) {
+			factoryCalled = true
+			return nil, fmt.Errorf("test decoder")
+		},
+	})
+
+	if recv.config.DecoderFactory == nil {
+		t.Error("expected DecoderFactory to be stored")
+	}
+	if factoryCalled {
+		t.Error("factory should not be called before connect")
 	}
 }
