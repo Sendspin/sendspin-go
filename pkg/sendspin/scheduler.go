@@ -71,7 +71,7 @@ func (s *Scheduler) Schedule(buf audio.Buffer) {
 
 	// Sanity logs for first 5 chunks showing timing
 	if received < 5 {
-		serverNow := sync.ServerMicrosNow()
+		serverNow := s.clockSync.ServerMicrosNow()
 		diff := buf.Timestamp - serverNow
 		rtt, quality := s.clockSync.GetStats()
 
