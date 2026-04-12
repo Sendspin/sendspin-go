@@ -3,7 +3,8 @@
 /sendspin-server
 /resonate-player
 /resonate-server
-test-sync
+/test-sync
+/ma-player
 *.exe
 *.dll
 *.so
@@ -35,4 +36,3 @@ output.txt
 sendspin-go
 resonate-go
 prompts/
-ma-player
