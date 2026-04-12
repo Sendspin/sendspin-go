@@ -15,6 +15,7 @@ import (
 
 	"github.com/Sendspin/sendspin-go/internal/discovery"
 	"github.com/Sendspin/sendspin-go/internal/server"
+	"github.com/Sendspin/sendspin-go/pkg/audio"
 	"github.com/Sendspin/sendspin-go/pkg/protocol"
 	"github.com/google/uuid"
 	"github.com/gorilla/websocket"
@@ -76,7 +77,8 @@ type Server struct {
 	clockStart time.Time
 
 	// Audio streaming
-	audioSource AudioSource
+	audioSource         AudioSource
+	consecutiveReadErrs int
 
 	// mDNS discovery
 	mdnsManager *discovery.Manager
@@ -105,6 +107,7 @@ type client struct {
 	// Negotiated codec for this client
 	Codec       string
 	OpusEncoder *server.OpusEncoder
+	Resampler   *audio.Resampler // Resampler for Opus (if source rate != 48kHz)
 
 	// Output channel for messages
 	sendChan chan interface{}
@@ -307,9 +310,19 @@ func (s *Server) generateAndSendChunk() {
 	samples := make([]int32, totalSamples)
 	n, err := s.audioSource.Read(samples)
 	if err != nil {
-		log.Printf("Error reading audio source: %v", err)
+		s.consecutiveReadErrs++
+		// Log every error for the first few, then throttle
+		if s.consecutiveReadErrs <= 3 || s.consecutiveReadErrs%50 == 0 {
+			log.Printf("Error reading audio source (%d consecutive): %v", s.consecutiveReadErrs, err)
+		}
+		// After 1 second of failures (50 ticks at 20ms), notify clients
+		if s.consecutiveReadErrs == 50 {
+			log.Printf("Audio source failed for 1s, sending stream/end to all clients")
+			s.notifyStreamEnd()
+		}
 		return
 	}
+	s.consecutiveReadErrs = 0
 
 	// Send to all clients
 	s.clientsMu.RLock()
@@ -322,13 +335,24 @@ func (s *Server) generateAndSendChunk() {
 		c.mu.RLock()
 		codec := c.Codec
 		opusEncoder := c.OpusEncoder
+		resampler := c.Resampler
 		c.mu.RUnlock()
 
 		// Encode based on client's negotiated codec
 		switch codec {
 		case "opus":
 			if opusEncoder != nil {
-				samples16 := convertToInt16(samples[:n])
+				samplesToEncode := samples[:n]
+
+				// Resample if needed (source rate != 48kHz)
+				if resampler != nil {
+					outputSamples := resampler.OutputSamplesNeeded(len(samplesToEncode))
+					resampled := make([]int32, outputSamples)
+					samplesWritten := resampler.Resample(samplesToEncode, resampled)
+					samplesToEncode = resampled[:samplesWritten]
+				}
+
+				samples16 := convertToInt16(samplesToEncode)
 				audioData, encodeErr = opusEncoder.Encode(samples16)
 				if encodeErr != nil {
 					log.Printf("Opus encode error for %s: %v", c.Name, encodeErr)
@@ -624,16 +648,26 @@ func (s *Server) addClientToStream(c *client) {
 	// Negotiate codec
 	codec := s.negotiateCodec(c)
 
-	// Create encoder if needed
+	// Create encoder and resampler if needed
 	var opusEncoder *server.OpusEncoder
-	chunkSamples := (s.audioSource.SampleRate() * ChunkDurationMs) / 1000
+	var resampler *audio.Resampler
+	sourceRate := s.audioSource.SampleRate()
 
 	switch codec {
 	case "opus":
-		encoder, err := server.NewOpusEncoder(s.audioSource.SampleRate(), s.audioSource.Channels(), chunkSamples)
+		// Opus requires 48kHz — create resampler if source rate differs
+		if sourceRate != 48000 {
+			resampler = audio.NewResampler(sourceRate, 48000, s.audioSource.Channels())
+			log.Printf("Created resampler: %dHz -> 48kHz for Opus (client: %s)", sourceRate, c.Name)
+		}
+
+		// Always create encoder at 48kHz
+		opusChunkSamples := (48000 * ChunkDurationMs) / 1000
+		encoder, err := server.NewOpusEncoder(48000, s.audioSource.Channels(), opusChunkSamples)
 		if err != nil {
 			log.Printf("Failed to create Opus encoder for %s, falling back to PCM: %v", c.Name, err)
 			codec = "pcm"
+			resampler = nil
 		} else {
 			opusEncoder = encoder
 		}
@@ -645,17 +679,26 @@ func (s *Server) addClientToStream(c *client) {
 	c.mu.Lock()
 	c.Codec = codec
 	c.OpusEncoder = opusEncoder
+	c.Resampler = resampler
 	c.mu.Unlock()
 
 	log.Printf("Added client %s with codec %s", c.Name, codec)
 
 	// Send stream/start message
+	// For Opus, report 48kHz since that's what the client will decode
+	streamSampleRate := s.audioSource.SampleRate()
+	streamBitDepth := DefaultBitDepth
+	if codec == "opus" {
+		streamSampleRate = 48000
+		streamBitDepth = 16
+	}
+
 	streamStart := protocol.StreamStart{
 		Player: &protocol.StreamStartPlayer{
 			Codec:      codec,
-			SampleRate: s.audioSource.SampleRate(),
+			SampleRate: streamSampleRate,
 			Channels:   s.audioSource.Channels(),
-			BitDepth:   DefaultBitDepth,
+			BitDepth:   streamBitDepth,
 		},
 	}
 
@@ -685,6 +728,22 @@ func (s *Server) addClientToStream(c *client) {
 	s.sendMessage(c, "group/update", groupUpdate)
 }
 
+// notifyStreamEnd sends stream/end to all connected player clients
+func (s *Server) notifyStreamEnd() {
+	streamEnd := protocol.StreamEnd{
+		Roles: []string{"player"},
+	}
+
+	s.clientsMu.RLock()
+	defer s.clientsMu.RUnlock()
+
+	for _, c := range s.clients {
+		if s.hasRole(c, "player") {
+			s.sendMessage(c, "stream/end", streamEnd)
+		}
+	}
+}
+
 // removeClient removes a client
 func (s *Server) removeClient(c *client) {
 	s.clientsMu.Lock()
@@ -695,6 +754,7 @@ func (s *Server) removeClient(c *client) {
 		c.OpusEncoder.Close()
 		c.OpusEncoder = nil
 	}
+	c.Resampler = nil
 	c.mu.Unlock()
 
 	delete(s.clients, c.ID)

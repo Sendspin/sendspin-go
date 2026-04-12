@@ -12,4 +12,10 @@ type Output interface {
 
 	// Close releases output resources
 	Close() error
+
+	// SetVolume sets the volume (0-100)
+	SetVolume(volume int)
+
+	// SetMuted sets mute state
+	SetMuted(muted bool)
 }

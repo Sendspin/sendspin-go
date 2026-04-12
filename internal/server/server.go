@@ -81,7 +81,7 @@ type Client struct {
 	Name         string
 	Conn         *websocket.Conn
 	Roles        []string
-	Capabilities *protocol.PlayerSupport
+	Capabilities *protocol.PlayerV1Support
 
 	// State
 	State  string
@@ -348,7 +348,7 @@ func (s *Server) handleConnection(conn *websocket.Conn) {
 		Name:         hello.Name,
 		Conn:         conn,
 		Roles:        hello.SupportedRoles,
-		Capabilities: hello.PlayerSupport,
+		Capabilities: hello.PlayerV1Support,
 		State:        "idle",
 		Volume:       100,
 		Muted:        false,

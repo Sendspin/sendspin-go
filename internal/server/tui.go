@@ -5,6 +5,7 @@ package server
 import (
 	"fmt"
 	"strings"
+	"sync"
 	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
@@ -16,6 +17,8 @@ type ServerTUI struct {
 	program  *tea.Program
 	updates  chan ServerStatus
 	quitChan chan struct{} // Signal to stop the server
+	stopped  bool
+	mu       sync.Mutex
 }
 
 // ServerStatus holds server state for TUI
@@ -188,6 +191,11 @@ func (t *ServerTUI) Start(serverName string, port int) error {
 
 // Update sends a status update to the TUI
 func (t *ServerTUI) Update(status ServerStatus) {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	if t.stopped {
+		return
+	}
 	select {
 	case t.updates <- status:
 	default:
@@ -197,6 +205,10 @@ func (t *ServerTUI) Update(status ServerStatus) {
 
 // Stop stops the TUI
 func (t *ServerTUI) Stop() {
+	t.mu.Lock()
+	t.stopped = true
+	t.mu.Unlock()
+
 	if t.program != nil {
 		t.program.Quit()
 	}

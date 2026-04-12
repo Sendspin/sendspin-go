@@ -207,6 +207,9 @@ func (p *Player) Connect() error {
 		log.Printf("Initial clock sync failed: %v", err)
 	}
 
+	// Tear down the player if the connection drops
+	go p.watchConnection()
+
 	// Start component goroutines
 	go p.handleStreamStart()
 	go p.handleStreamClear()
@@ -218,6 +221,21 @@ func (p *Player) Connect() error {
 	go p.clockSyncLoop()
 
 	return nil
+}
+
+// watchConnection monitors the protocol client and cancels the player context
+// if the connection is lost, ensuring all goroutines exit cleanly.
+func (p *Player) watchConnection() {
+	select {
+	case <-p.client.Done():
+		log.Printf("Server connection lost, shutting down player")
+		p.state.Connected = false
+		p.state.State = "idle"
+		p.notifyStateChange()
+		p.cancel()
+	case <-p.ctx.Done():
+		return
+	}
 }
 
 // performInitialSync does multiple sync rounds before audio starts
@@ -309,8 +327,6 @@ func (p *Player) handleStreamStart() {
 				decoder, err = decode.NewOpus(format)
 			case "flac":
 				decoder, err = decode.NewFLAC(format)
-			case "mp3":
-				decoder, err = decode.NewMP3(format)
 			default:
 				err = fmt.Errorf("unsupported codec: %s", format.Codec)
 			}
@@ -610,8 +626,8 @@ func (p *Player) SetVolume(volume int) error {
 	p.state.Volume = volume
 
 	// Apply to output
-	if oto, ok := p.output.(*output.Oto); ok {
-		oto.SetVolume(volume)
+	if p.output != nil {
+		p.output.SetVolume(volume)
 	}
 
 	// Send state to server per spec
@@ -632,8 +648,8 @@ func (p *Player) Mute(muted bool) error {
 	p.state.Muted = muted
 
 	// Apply to output
-	if oto, ok := p.output.(*output.Oto); ok {
-		oto.SetMuted(muted)
+	if p.output != nil {
+		p.output.SetMuted(muted)
 	}
 
 	// Send state to server per spec
