@@ -24,8 +24,8 @@ func TestNewPlayer_Defaults(t *testing.T) {
 
 func TestNewPlayer_ProcessCallbackStored(t *testing.T) {
 	player, _ := NewPlayer(PlayerConfig{
-		ServerAddr: "localhost:8927",
-		PlayerName: "Test Player",
+		ServerAddr:      "localhost:8927",
+		PlayerName:      "Test Player",
 		ProcessCallback: func(samples []int32) {},
 	})
 	if player.config.ProcessCallback == nil {
