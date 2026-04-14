@@ -172,31 +172,3 @@ func (o *Oto) IsMuted() bool {
 	return o.muted
 }
 
-// applyVolume applies volume and mute to samples with clipping protection
-func applyVolume(samples []int32, volume int, muted bool) []int32 {
-	multiplier := getVolumeMultiplier(volume, muted)
-
-	result := make([]int32, len(samples))
-	for i, sample := range samples {
-		scaled := int64(float64(sample) * multiplier)
-
-		// Clamp to 24-bit range to prevent overflow
-		if scaled > audio.Max24Bit {
-			scaled = audio.Max24Bit
-		} else if scaled < audio.Min24Bit {
-			scaled = audio.Min24Bit
-		}
-
-		result[i] = int32(scaled)
-	}
-
-	return result
-}
-
-// getVolumeMultiplier calculates volume multiplier
-func getVolumeMultiplier(volume int, muted bool) float64 {
-	if muted {
-		return 0.0
-	}
-	return float64(volume) / 100.0
-}
