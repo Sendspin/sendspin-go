@@ -8,6 +8,7 @@ import (
 	"io"
 	"log"
 	"net"
+	"strings"
 	"time"
 
 	"github.com/hashicorp/mdns"
@@ -50,9 +51,15 @@ type ClientInfo struct {
 }
 
 // clientInfoFromEntry converts an mdns.ServiceEntry into a ClientInfo.
-// Returns nil when the entry lacks a usable IPv4 address or port.
+// Returns nil when the entry lacks a usable IPv4 address or port, or when
+// the entry does not belong to the _sendspin._tcp service (hashicorp/mdns
+// is promiscuous and forwards any multicast response received during the
+// query window, not just matches to the queried service).
 func clientInfoFromEntry(entry *mdns.ServiceEntry) *ClientInfo {
 	if entry == nil || entry.AddrV4 == nil || entry.Port == 0 {
+		return nil
+	}
+	if !strings.Contains(entry.Name, "._sendspin._tcp.") {
 		return nil
 	}
 	txt := parseTXT(entry.InfoFields)
@@ -148,6 +155,17 @@ func (m *Manager) browseLoop() {
 
 		go func() {
 			for entry := range entries {
+				// hashicorp/mdns is promiscuous: any multicast response arriving
+				// on the socket during the query window is forwarded, regardless
+				// of whether it matches Service. Filter by instance-name suffix
+				// so we don't dial Google Cast, ADB, etc.
+				if !strings.Contains(entry.Name, "._sendspin-server._tcp.") {
+					continue
+				}
+				if entry.AddrV4 == nil || entry.Port == 0 {
+					continue
+				}
+
 				server := &ServerInfo{
 					Name: entry.Name,
 					Host: entry.AddrV4.String(),

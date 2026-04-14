@@ -95,6 +95,20 @@ func TestClientInfoFromEntry(t *testing.T) {
 			},
 			want: nil,
 		},
+		{
+			// hashicorp/mdns is promiscuous and forwards any multicast
+			// response, not just matches to the queried service. Entries
+			// for other services must be filtered out or the server would
+			// dial Google Cast, ADB, etc. as if they were sendspin clients.
+			name: "non-sendspin service is filtered out",
+			entry: &mdns.ServiceEntry{
+				Name:       "SHIELD._googlecast._tcp.local.",
+				AddrV4:     net.ParseIP("192.168.1.50"),
+				Port:       8009,
+				InfoFields: []string{},
+			},
+			want: nil,
+		},
 	}
 
 	for _, tt := range tests {
