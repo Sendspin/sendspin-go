@@ -41,7 +41,7 @@ type PlayerConfig struct {
 	OnError func(error)
 
 	// Output overrides the default audio output backend.
-	// When nil, auto-selects oto (16-bit) or malgo (24-bit) based on stream format.
+	// When nil, a malgo-backed output is created on stream start.
 	Output output.Output
 
 	// DecoderFactory overrides the default decoder selection.
@@ -166,13 +166,7 @@ func (p *Player) Connect() error {
 
 func (p *Player) onStreamStart(format audio.Format) {
 	if p.output == nil {
-		if format.BitDepth <= 16 {
-			p.output = output.NewOto()
-			log.Printf("Using oto backend for %d-bit audio", format.BitDepth)
-		} else {
-			p.output = output.NewMalgo()
-			log.Printf("Using malgo backend for %d-bit audio", format.BitDepth)
-		}
+		p.output = output.NewMalgo()
 	}
 
 	if err := p.output.Open(format.SampleRate, format.Channels, format.BitDepth); err != nil {
