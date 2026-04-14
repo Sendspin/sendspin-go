@@ -71,7 +71,7 @@ func NewReceiver(config ReceiverConfig) (*Receiver, error) {
 		config.DeviceInfo.Manufacturer = "Sendspin"
 	}
 	if config.DeviceInfo.SoftwareVersion == "" {
-		config.DeviceInfo.SoftwareVersion = "1.0.0"
+		config.DeviceInfo.SoftwareVersion = "1.2.0"
 	}
 
 	ctx, cancel := context.WithCancel(context.Background())
