@@ -5,7 +5,7 @@ package ui
 import (
 	"testing"
 
-	"github.com/Sendspin/sendspin-go/internal/sync"
+	"github.com/Sendspin/sendspin-go/pkg/sync"
 )
 
 func TestNewModel(t *testing.T) {
