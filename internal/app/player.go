@@ -17,6 +17,7 @@ import (
 	"github.com/Sendspin/sendspin-go/internal/sync"
 	"github.com/Sendspin/sendspin-go/internal/ui"
 	"github.com/Sendspin/sendspin-go/internal/version"
+	"github.com/Sendspin/sendspin-go/pkg/audio/output"
 	"github.com/Sendspin/sendspin-go/pkg/protocol"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/google/uuid"
@@ -39,7 +40,9 @@ type Player struct {
 	scheduler       *player.Scheduler
 	schedulerCtx    context.Context    // Context for scheduler goroutines
 	schedulerCancel context.CancelFunc // Cancel function for scheduler goroutines
-	output          *player.Output
+	output          output.Output
+	volume          int
+	muted           bool
 	discovery       *discovery.Manager
 	decoder         audio.Decoder
 	tuiProg         *tea.Program
@@ -65,7 +68,9 @@ func New(config Config) *Player {
 	return &Player{
 		config:      config,
 		clockSync:   clockSync,
-		output:      player.NewOutput(),
+		output:      output.NewMalgo(),
+		volume:      100,
+		muted:       false,
 		artwork:     artworkDL,
 		ctx:         ctx,
 		cancel:      cancel,
@@ -322,10 +327,14 @@ func (p *Player) handleStreamStart() {
 			p.decoder = decoder
 
 			// Initialize output
-			if err := p.output.Initialize(format); err != nil {
+			if err := p.output.Open(start.Player.SampleRate, start.Player.Channels, start.Player.BitDepth); err != nil {
 				log.Printf("Failed to initialize output: %v", err)
 				continue
 			}
+
+			// Apply any pre-stream volume/mute state to the fresh device
+			p.output.SetVolume(p.volume)
+			p.output.SetMuted(p.muted)
 
 			// Stop any existing scheduler goroutines before starting new ones
 			if p.schedulerCancel != nil {
@@ -395,7 +404,7 @@ func (p *Player) handleScheduledAudio(ctx context.Context) {
 	for {
 		select {
 		case buf := <-p.scheduler.Output():
-			if err := p.output.Play(buf); err != nil {
+			if err := p.output.Write(buf.Samples); err != nil {
 				log.Printf("Playback error: %v", err)
 			}
 
@@ -412,19 +421,21 @@ func (p *Player) handleControls() {
 		case cmd := <-p.client.ControlMsgs:
 			switch cmd.Command {
 			case "volume":
+				p.volume = cmd.Volume
 				p.output.SetVolume(cmd.Volume)
 				p.client.SendState(protocol.ClientState{
 					State:  p.playerState,
-					Volume: cmd.Volume,
-					Muted:  p.output.IsMuted(),
+					Volume: p.volume,
+					Muted:  p.muted,
 				})
 
 			case "mute":
+				p.muted = cmd.Mute
 				p.output.SetMuted(cmd.Mute)
 				p.client.SendState(protocol.ClientState{
 					State:  p.playerState,
-					Volume: p.output.GetVolume(),
-					Muted:  cmd.Mute,
+					Volume: p.volume,
+					Muted:  p.muted,
 				})
 			}
 
@@ -500,7 +511,8 @@ func (p *Player) handleVolumeControl() {
 		case vol := <-p.volumeCtrl.Changes:
 			log.Printf("Volume change: %d%%, muted=%v", vol.Volume, vol.Muted)
 
-			// Apply to output
+			p.volume = vol.Volume
+			p.muted = vol.Muted
 			if p.output != nil {
 				p.output.SetVolume(vol.Volume)
 				p.output.SetMuted(vol.Muted)
@@ -584,7 +596,9 @@ func (p *Player) Stop() {
 	}
 
 	if p.output != nil {
-		p.output.Close()
+		if err := p.output.Close(); err != nil {
+			log.Printf("Warning: output close error: %v", err)
+		}
 	}
 }
 

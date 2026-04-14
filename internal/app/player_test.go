@@ -224,13 +224,12 @@ func TestPlayerOutputInitialization(t *testing.T) {
 		t.Fatal("output should be initialized")
 	}
 
-	// Output should have default volume settings
-	volume := player.output.GetVolume()
-	if volume != 100 {
-		t.Errorf("expected default volume 100, got %d", volume)
+	// Volume and mute are tracked on Player, not on the output interface
+	if player.volume != 100 {
+		t.Errorf("expected default volume 100, got %d", player.volume)
 	}
 
-	if player.output.IsMuted() {
+	if player.muted {
 		t.Error("expected output to not be muted by default")
 	}
 }
