@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io"
 	"log"
+	"math"
 
 	"github.com/Sendspin/sendspin-go/pkg/audio"
 	"github.com/ebitengine/oto/v3"
@@ -42,10 +43,9 @@ func NewOto() Output {
 
 // Open initializes the output device
 func (o *Oto) Open(sampleRate, channels, bitDepth int) error {
-	// oto only supports 16-bit output
-	if bitDepth != 16 {
-		log.Printf("Warning: oto only supports 16-bit output, ignoring requested bitDepth=%d", bitDepth)
-	}
+	// Output runs at float32, which carries 24-bit precision through oto to
+	// the OS mixer. The requested bitDepth is informational only.
+	_ = bitDepth
 
 	// If already initialized with same format, reuse the existing context
 	if o.otoCtx != nil && o.sampleRate == sampleRate && o.channels == channels {
@@ -64,7 +64,7 @@ func (o *Oto) Open(sampleRate, channels, bitDepth int) error {
 	op := &oto.NewContextOptions{
 		SampleRate:   sampleRate,
 		ChannelCount: channels,
-		Format:       oto.FormatSignedInt16LE,
+		Format:       oto.FormatFloat32LE,
 	}
 
 	ctx, readyChan, err := oto.NewContext(op)
@@ -101,16 +101,12 @@ func (o *Oto) Write(samples []int32) error {
 	// Apply volume to samples (int32 format)
 	volumedSamples := applyVolume(samples, o.volume, o.muted)
 
-	// Convert int32 samples to int16 for oto (oto uses 16-bit output)
-	samples16 := make([]int16, len(volumedSamples))
+	// Normalize int32 24-bit samples to float32 in [-1.0, 1.0) and pack as
+	// little-endian IEEE 754. float32 preserves full 24-bit precision.
+	output := make([]byte, len(volumedSamples)*4)
 	for i, s := range volumedSamples {
-		samples16[i] = audio.SampleToInt16(s)
-	}
-
-	// Convert int16 samples to bytes for audio output
-	output := make([]byte, len(samples16)*2)
-	for i, sample := range samples16 {
-		binary.LittleEndian.PutUint16(output[i*2:], uint16(sample))
+		bits := math.Float32bits(audio.SampleToFloat32(s))
+		binary.LittleEndian.PutUint32(output[i*4:], bits)
 	}
 
 	// Write to pipe (which feeds the persistent player)

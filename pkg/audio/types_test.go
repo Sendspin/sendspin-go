@@ -50,6 +50,36 @@ func TestSampleToInt16(t *testing.T) {
 	}
 }
 
+func TestSampleToFloat32(t *testing.T) {
+	tests := []struct {
+		name     string
+		input    int32
+		expected float32
+	}{
+		{"zero", 0, 0.0},
+		{"max 24-bit", Max24Bit, float32(Max24Bit) / float32(1<<23)},
+		{"min 24-bit", Min24Bit, -1.0},
+		{"half scale positive", 1 << 22, 0.5},
+		{"half scale negative", -(1 << 22), -0.5},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := SampleToFloat32(tt.input)
+			if result != tt.expected {
+				t.Errorf("expected %f, got %f", tt.expected, result)
+			}
+		})
+	}
+
+	for _, s := range []int32{Max24Bit, Min24Bit, 0, 1, -1, 1234567, -1234567} {
+		f := SampleToFloat32(s)
+		if f < -1.0 || f >= 1.0 {
+			t.Errorf("sample %d normalized to %f, outside [-1.0, 1.0)", s, f)
+		}
+	}
+}
+
 func TestSampleTo24Bit(t *testing.T) {
 	tests := []struct {
 		name     string

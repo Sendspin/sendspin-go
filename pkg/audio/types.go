@@ -39,6 +39,15 @@ func SampleFromInt16(sample int16) int32 {
 	return int32(sample) << 8
 }
 
+// SampleToFloat32 converts a 24-bit int32 sample to a normalized float32
+// in the range [-1.0, 1.0). Used for float32 audio output paths that
+// preserve 24-bit precision (float32 has a 24-bit mantissa).
+func SampleToFloat32(sample int32) float32 {
+	// Divide by 2^23 so Max24Bit maps just under 1.0 and Min24Bit maps to -1.0.
+	const scale = 1.0 / float32(1<<23)
+	return float32(sample) * scale
+}
+
 // SampleTo24Bit converts int32 to 24-bit packed bytes (little-endian)
 func SampleTo24Bit(sample int32) [3]byte {
 	// Take lower 24 bits, pack little-endian
