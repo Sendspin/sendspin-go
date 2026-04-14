@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/Sendspin/sendspin-go/internal/discovery"
+	"github.com/gorilla/websocket"
 )
 
 // clientInfoURL builds a ws:// URL from a discovered ClientInfo.
@@ -22,6 +23,22 @@ func clientInfoURL(info *discovery.ClientInfo) string {
 		path = "/" + path
 	}
 	return fmt.Sprintf("ws://%s:%d%s", info.Host, info.Port, path)
+}
+
+// dialAndHandle opens a WebSocket to a discovered client and hands the
+// connection to the provided handler. The handler is expected to block
+// until the connection is fully drained (e.g. handleConnection).
+func dialAndHandle(ctx context.Context, info *discovery.ClientInfo, handle func(*websocket.Conn)) error {
+	url := clientInfoURL(info)
+	dialer := websocket.Dialer{HandshakeTimeout: 10 * time.Second}
+
+	conn, _, err := dialer.DialContext(ctx, url, nil)
+	if err != nil {
+		return fmt.Errorf("dial %s: %w", url, err)
+	}
+	log.Printf("Dialed discovered client %s at %s", info.Name, url)
+	handle(conn)
+	return nil
 }
 
 // dialFunc dials a discovered client and returns when the resulting
