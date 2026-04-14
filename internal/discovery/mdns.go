@@ -37,6 +37,42 @@ type ServerInfo struct {
 	Port int
 }
 
+// ClientInfo describes a discovered client (player) advertised via
+// _sendspin._tcp.local.
+type ClientInfo struct {
+	Instance string // fully-qualified mDNS instance name (stable dedupe key)
+	Name     string // friendly name from TXT "name=" or falls back to Instance
+	Host     string // IPv4 address as a string
+	Port     int
+	Path     string // WebSocket path from TXT "path=" (default "/sendspin")
+}
+
+// clientInfoFromEntry converts an mdns.ServiceEntry into a ClientInfo.
+// Returns nil when the entry lacks a usable IPv4 address or port.
+func clientInfoFromEntry(entry *mdns.ServiceEntry) *ClientInfo {
+	if entry == nil || entry.AddrV4 == nil || entry.Port == 0 {
+		return nil
+	}
+	txt := parseTXT(entry.InfoFields)
+
+	path := txt["path"]
+	if path == "" {
+		path = "/sendspin"
+	}
+	name := txt["name"]
+	if name == "" {
+		name = entry.Name
+	}
+
+	return &ClientInfo{
+		Instance: entry.Name,
+		Name:     name,
+		Host:     entry.AddrV4.String(),
+		Port:     entry.Port,
+		Path:     path,
+	}
+}
+
 // NewManager creates a discovery manager
 func NewManager(config Config) *Manager {
 	ctx, cancel := context.WithCancel(context.Background())
