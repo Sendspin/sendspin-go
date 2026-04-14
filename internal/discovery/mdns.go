@@ -8,6 +8,7 @@ import (
 	"io"
 	"log"
 	"net"
+	"time"
 
 	"github.com/hashicorp/mdns"
 )
@@ -227,7 +228,7 @@ func (m *Manager) browseClientsLoop() {
 		params := &mdns.QueryParam{
 			Service: "_sendspin._tcp",
 			Domain:  "local",
-			Timeout: 3,
+			Timeout: 3 * time.Second,
 			Entries: entries,
 			Logger:  silentLogger,
 		}
