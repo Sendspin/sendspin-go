@@ -13,7 +13,6 @@ import (
 )
 
 func main() {
-	// Parse command-line flags
 	port := flag.Int("port", 8927, "Server port")
 	serverName := flag.String("name", "Basic Server", "Server name")
 	sampleRate := flag.Int("rate", 192000, "Sample rate (Hz)")
@@ -23,10 +22,8 @@ func main() {
 
 	log.Printf("Creating test tone source: %dHz, %d channels", *sampleRate, *channels)
 
-	// Create a test tone audio source
 	source := sendspin.NewTestTone(*sampleRate, *channels)
 
-	// Create server configuration
 	config := sendspin.ServerConfig{
 		Port:       *port,
 		Name:       *serverName,
@@ -35,7 +32,6 @@ func main() {
 		Debug:      false,
 	}
 
-	// Create server
 	server, err := sendspin.NewServer(config)
 	if err != nil {
 		log.Fatalf("Failed to create server: %v", err)
@@ -49,7 +45,6 @@ func main() {
 		log.Printf("  mDNS: enabled")
 	}
 
-	// Start server in goroutine
 	errChan := make(chan error, 1)
 	go func() {
 		if err := server.Start(); err != nil {
@@ -66,7 +61,6 @@ func main() {
 		}
 	}()
 
-	// Wait for interrupt signal or error
 	log.Printf("\nServer running. Press Ctrl+C to stop")
 	sigChan := make(chan os.Signal, 1)
 	signal.Notify(sigChan, os.Interrupt, syscall.SIGTERM)
@@ -78,7 +72,6 @@ func main() {
 		log.Printf("Server error: %v", err)
 	}
 
-	// Stop server
 	server.Stop()
 	log.Printf("Server stopped")
 }

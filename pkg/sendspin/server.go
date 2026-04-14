@@ -22,29 +22,24 @@ import (
 )
 
 const (
-	// ProtocolVersion is the version of the Sendspin protocol we implement
 	ProtocolVersion = 1
 
 	// Binary message type IDs per spec (bits 7-2 for role, bits 1-0 for slot)
 	// Player role: 000001xx (4-7), slot 0 = 4
 	AudioChunkMessageType = 4
 
-	// Audio format constants
 	DefaultSampleRate = 192000
 	DefaultChannels   = 2
 	DefaultBitDepth   = 24
 
-	// Chunk timing
 	ChunkDurationMs = 20  // 20ms chunks
 	BufferAheadMs   = 500 // Send audio 500ms ahead
 )
 
-// ServerConfig configures a Sendspin server
 type ServerConfig struct {
 	// Port to listen on (default: 8927)
 	Port int
 
-	// Name of the server for identification
 	Name string
 
 	// Audio source to stream (required)
@@ -53,7 +48,6 @@ type ServerConfig struct {
 	// EnableMDNS enables mDNS service advertisement (default: true)
 	EnableMDNS bool
 
-	// Debug enables debug logging
 	Debug bool
 
 	// DiscoverClients enables server-initiated discovery: browse for
@@ -62,36 +56,28 @@ type ServerConfig struct {
 	DiscoverClients bool
 }
 
-// Server represents a Sendspin streaming server
 type Server struct {
 	config   ServerConfig
 	serverID string
 
-	// WebSocket upgrader
 	upgrader websocket.Upgrader
 
-	// HTTP server
 	httpServer *http.Server
 	mux        *http.ServeMux
 
-	// Client management
 	clients   map[string]*client
 	clientsMu sync.RWMutex
 
-	// Server clock (monotonic microseconds)
-	clockStart time.Time
+	clockStart time.Time // monotonic microseconds origin
 
-	// Audio streaming
 	audioSource         AudioSource
 	consecutiveReadErrs int
 
-	// mDNS discovery
 	mdnsManager *discovery.Manager
 
-	// client dialer (server-initiated discovery)
+	// server-initiated discovery dialer cancel
 	dialerCancel context.CancelFunc
 
-	// Control
 	stopChan   chan struct{}
 	stopOnce   sync.Once
 	shutdownMu sync.RWMutex
@@ -99,7 +85,6 @@ type Server struct {
 	wg         sync.WaitGroup
 }
 
-// client represents a connected client (internal)
 type client struct {
 	ID           string
 	Name         string
@@ -107,24 +92,20 @@ type client struct {
 	Roles        []string
 	Capabilities *protocol.PlayerV1Support
 
-	// State
 	State  string
 	Volume int
 	Muted  bool
 
-	// Negotiated codec for this client
 	Codec       string
 	OpusEncoder *server.OpusEncoder
-	Resampler   *audio.Resampler // Resampler for Opus (if source rate != 48kHz)
+	Resampler   *audio.Resampler // non-nil only when source rate != 48kHz
 
-	// Output channel for messages
 	sendChan chan interface{}
 	done     chan struct{}
 
 	mu sync.RWMutex
 }
 
-// ClientInfo represents information about a connected client
 type ClientInfo struct {
 	ID     string
 	Name   string
@@ -134,9 +115,7 @@ type ClientInfo struct {
 	Codec  string
 }
 
-// NewServer creates a new Sendspin server
 func NewServer(config ServerConfig) (*Server, error) {
-	// Validate config
 	if config.Port == 0 {
 		config.Port = 8927
 	}
@@ -156,8 +135,8 @@ func NewServer(config ServerConfig) (*Server, error) {
 		audioSource: config.Source,
 		upgrader: websocket.Upgrader{
 			CheckOrigin: func(r *http.Request) bool {
-				// For local network deployments, accept all origins
-				// TODO: For production, implement proper origin validation
+				// TODO: For production, implement proper origin validation.
+				// Currently permissive for local-network deployments.
 				return true
 			},
 		},
@@ -169,7 +148,6 @@ func NewServer(config ServerConfig) (*Server, error) {
 	return s, nil
 }
 
-// Start starts the server and begins streaming
 func (s *Server) Start() error {
 	log.Printf("Server starting: %s (ID: %s)", s.config.Name, s.serverID)
 	log.Printf("Audio source: %dHz/%dbit/%dch",
@@ -177,7 +155,6 @@ func (s *Server) Start() error {
 		DefaultBitDepth,
 		s.audioSource.Channels())
 
-	// Start mDNS advertisement if enabled
 	if s.config.EnableMDNS {
 		s.mdnsManager = discovery.NewManager(discovery.Config{
 			ServiceName: s.config.Name,
@@ -192,7 +169,6 @@ func (s *Server) Start() error {
 		}
 	}
 
-	// Start server-initiated client discovery if enabled
 	if s.config.DiscoverClients {
 		if s.mdnsManager == nil {
 			// If mDNS isn't running for advertising, start a manager just for browsing.
@@ -223,17 +199,14 @@ func (s *Server) Start() error {
 		}
 	}
 
-	// Set up HTTP handlers
 	s.mux.HandleFunc("/sendspin", s.handleWebSocket)
 
-	// Start audio streaming
 	s.wg.Add(1)
 	go func() {
 		defer s.wg.Done()
 		s.streamAudio()
 	}()
 
-	// Start HTTP server
 	addr := fmt.Sprintf(":%d", s.config.Port)
 	log.Printf("WebSocket server listening on %s", addr)
 
@@ -242,7 +215,6 @@ func (s *Server) Start() error {
 		Handler: s.mux,
 	}
 
-	// Run server in goroutine
 	errChan := make(chan error, 1)
 	go func() {
 		if err := s.httpServer.ListenAndServe(); err != http.ErrServerClosed {
@@ -250,7 +222,6 @@ func (s *Server) Start() error {
 		}
 	}()
 
-	// Wait for stop signal or server error
 	select {
 	case <-s.stopChan:
 		log.Printf("Server shutting down...")
@@ -259,7 +230,6 @@ func (s *Server) Start() error {
 		return err
 	}
 
-	// Mark server as shutting down
 	s.shutdownMu.Lock()
 	s.isShutdown = true
 	s.shutdownMu.Unlock()
@@ -270,12 +240,10 @@ func (s *Server) Start() error {
 		s.dialerCancel()
 	}
 
-	// Stop mDNS
 	if s.mdnsManager != nil {
 		s.mdnsManager.Stop()
 	}
 
-	// Graceful shutdown with timeout
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 
@@ -283,7 +251,6 @@ func (s *Server) Start() error {
 		log.Printf("HTTP server shutdown error: %v", err)
 	}
 
-	// Close audio source
 	if err := s.audioSource.Close(); err != nil {
 		log.Printf("Error closing audio source: %v", err)
 	}
@@ -294,14 +261,12 @@ func (s *Server) Start() error {
 	return nil
 }
 
-// Stop stops the server
 func (s *Server) Stop() {
 	s.stopOnce.Do(func() {
 		close(s.stopChan)
 	})
 }
 
-// Clients returns information about all connected clients
 func (s *Server) Clients() []ClientInfo {
 	s.clientsMu.RLock()
 	defer s.clientsMu.RUnlock()
@@ -323,7 +288,6 @@ func (s *Server) Clients() []ClientInfo {
 	return clients
 }
 
-// streamAudio generates and sends audio chunks to clients
 func (s *Server) streamAudio() {
 	log.Printf("Audio streaming started")
 
@@ -341,17 +305,13 @@ func (s *Server) streamAudio() {
 	}
 }
 
-// generateAndSendChunk generates a chunk of audio and sends it to all clients
 func (s *Server) generateAndSendChunk() {
-	// Get current timestamp + buffer ahead time
 	currentTime := s.getClockMicros()
 	playbackTime := currentTime + (BufferAheadMs * 1000)
 
-	// Calculate chunk size based on source sample rate
 	chunkSamples := (s.audioSource.SampleRate() * ChunkDurationMs) / 1000
 	totalSamples := chunkSamples * s.audioSource.Channels()
 
-	// Read audio samples from source
 	samples := make([]int32, totalSamples)
 	n, err := s.audioSource.Read(samples)
 	if err != nil {
@@ -369,7 +329,6 @@ func (s *Server) generateAndSendChunk() {
 	}
 	s.consecutiveReadErrs = 0
 
-	// Send to all clients
 	s.clientsMu.RLock()
 	defer s.clientsMu.RUnlock()
 
@@ -383,13 +342,12 @@ func (s *Server) generateAndSendChunk() {
 		resampler := c.Resampler
 		c.mu.RUnlock()
 
-		// Encode based on client's negotiated codec
 		switch codec {
 		case "opus":
 			if opusEncoder != nil {
 				samplesToEncode := samples[:n]
 
-				// Resample if needed (source rate != 48kHz)
+				// Resample when source rate != 48kHz (Opus is locked to 48kHz)
 				if resampler != nil {
 					outputSamples := resampler.OutputSamplesNeeded(len(samplesToEncode))
 					resampled := make([]int32, outputSamples)
@@ -412,7 +370,6 @@ func (s *Server) generateAndSendChunk() {
 			audioData = encodePCM(samples[:n])
 		}
 
-		// Create binary message
 		chunk := createAudioChunk(playbackTime, audioData)
 
 		if err := s.sendBinary(c, chunk); err != nil {
@@ -423,7 +380,6 @@ func (s *Server) generateAndSendChunk() {
 	}
 }
 
-// handleWebSocket handles WebSocket connections
 func (s *Server) handleWebSocket(w http.ResponseWriter, r *http.Request) {
 	conn, err := s.upgrader.Upgrade(w, r, nil)
 	if err != nil {
@@ -435,12 +391,10 @@ func (s *Server) handleWebSocket(w http.ResponseWriter, r *http.Request) {
 	s.handleConnection(conn)
 }
 
-// handleConnection manages a client connection
 func (s *Server) handleConnection(conn *websocket.Conn) {
 	defer conn.Close()
 	conn.SetReadLimit(1 << 20) // 1MB
 
-	// Check if server is shutting down
 	s.shutdownMu.RLock()
 	if s.isShutdown {
 		s.shutdownMu.RUnlock()
@@ -449,7 +403,6 @@ func (s *Server) handleConnection(conn *websocket.Conn) {
 	}
 	s.shutdownMu.RUnlock()
 
-	// Wait for client/hello
 	_, data, err := conn.ReadMessage()
 	if err != nil {
 		log.Printf("Error reading hello: %v", err)
@@ -467,7 +420,6 @@ func (s *Server) handleConnection(conn *websocket.Conn) {
 		return
 	}
 
-	// Parse client hello
 	helloData, err := json.Marshal(msg.Payload)
 	if err != nil {
 		log.Printf("Error marshaling hello payload: %v", err)
@@ -491,7 +443,6 @@ func (s *Server) handleConnection(conn *websocket.Conn) {
 
 	log.Printf("Client hello: %s (ID: %s, Roles: %v)", hello.Name, hello.ClientID, hello.SupportedRoles)
 
-	// Create client
 	c := &client{
 		ID:           hello.ClientID,
 		Name:         hello.Name,
@@ -505,7 +456,6 @@ func (s *Server) handleConnection(conn *websocket.Conn) {
 		done:         make(chan struct{}),
 	}
 
-	// Check for duplicate and register
 	s.clientsMu.Lock()
 	if _, exists := s.clients[hello.ClientID]; exists {
 		s.clientsMu.Unlock()
@@ -520,14 +470,13 @@ func (s *Server) handleConnection(conn *websocket.Conn) {
 		log.Printf("Client disconnected: %s", c.Name)
 	}()
 
-	// Send server/hello with active roles per spec
 	activeRoles := s.activateRoles(hello.SupportedRoles)
 	serverHello := protocol.ServerHello{
 		ServerID:         s.serverID,
 		Name:             s.config.Name,
 		Version:          ProtocolVersion,
 		ActiveRoles:      activeRoles,
-		ConnectionReason: "playback", // We're a streaming server
+		ConnectionReason: "playback",
 	}
 
 	if err := s.sendMessage(c, "server/hello", serverHello); err != nil {
@@ -535,19 +484,16 @@ func (s *Server) handleConnection(conn *websocket.Conn) {
 		return
 	}
 
-	// Start writer goroutine
 	s.wg.Add(1)
 	go func() {
 		defer s.wg.Done()
 		s.clientWriter(c)
 	}()
 
-	// Start stream for player clients
 	if s.hasRole(c, "player") {
 		s.addClientToStream(c)
 	}
 
-	// Read messages from client
 	for {
 		_, data, err := conn.ReadMessage()
 		if err != nil {
@@ -561,7 +507,6 @@ func (s *Server) handleConnection(conn *websocket.Conn) {
 	}
 }
 
-// clientWriter sends messages to the client
 func (s *Server) clientWriter(c *client) {
 	ticker := time.NewTicker(30 * time.Second)
 	defer ticker.Stop()
@@ -599,7 +544,6 @@ func (s *Server) clientWriter(c *client) {
 	}
 }
 
-// handleClientMessage processes messages from clients
 func (s *Server) handleClientMessage(c *client, data []byte) {
 	var msg protocol.Message
 	if err := json.Unmarshal(data, &msg); err != nil {
@@ -621,7 +565,6 @@ func (s *Server) handleClientMessage(c *client, data []byte) {
 	}
 }
 
-// handleTimeSync responds to time synchronization requests
 func (s *Server) handleTimeSync(c *client, payload interface{}) {
 	serverRecv := s.getClockMicros()
 
@@ -646,7 +589,7 @@ func (s *Server) handleTimeSync(c *client, payload interface{}) {
 	s.sendMessage(c, "server/time", response)
 }
 
-// handleClientState handles state updates from clients per spec
+// handleClientState applies a client's player state update per spec.
 func (s *Server) handleClientState(c *client, payload interface{}) {
 	stateData, err := json.Marshal(payload)
 	if err != nil {
@@ -658,7 +601,6 @@ func (s *Server) handleClientState(c *client, payload interface{}) {
 		return
 	}
 
-	// Handle player state
 	if stateMsg.Player != nil {
 		c.mu.Lock()
 		c.State = stateMsg.Player.State
@@ -672,7 +614,6 @@ func (s *Server) handleClientState(c *client, payload interface{}) {
 	}
 }
 
-// handleClientGoodbye handles graceful disconnect from clients
 func (s *Server) handleClientGoodbye(c *client, payload interface{}) {
 	goodbyeData, err := json.Marshal(payload)
 	if err != nil {
@@ -685,15 +626,12 @@ func (s *Server) handleClientGoodbye(c *client, payload interface{}) {
 	}
 
 	log.Printf("Client %s goodbye: %s", c.Name, goodbye.Reason)
-	// Connection will be closed after message handling
+	// Connection close happens in handleConnection's read loop once this returns.
 }
 
-// addClientToStream adds a client to receive audio
 func (s *Server) addClientToStream(c *client) {
-	// Negotiate codec
 	codec := s.negotiateCodec(c)
 
-	// Create encoder and resampler if needed
 	var opusEncoder *server.OpusEncoder
 	var resampler *audio.Resampler
 	sourceRate := s.audioSource.SampleRate()
@@ -706,7 +644,6 @@ func (s *Server) addClientToStream(c *client) {
 			log.Printf("Created resampler: %dHz -> 48kHz for Opus (client: %s)", sourceRate, c.Name)
 		}
 
-		// Always create encoder at 48kHz
 		opusChunkSamples := (48000 * ChunkDurationMs) / 1000
 		encoder, err := server.NewOpusEncoder(48000, s.audioSource.Channels(), opusChunkSamples)
 		if err != nil {
@@ -729,8 +666,8 @@ func (s *Server) addClientToStream(c *client) {
 
 	log.Printf("Added client %s with codec %s", c.Name, codec)
 
-	// Send stream/start message
-	// For Opus, report 48kHz since that's what the client will decode
+	// For Opus, report 48kHz to the client since that's what it will decode
+	// (the resampler runs server-side before encoding).
 	streamSampleRate := s.audioSource.SampleRate()
 	streamBitDepth := DefaultBitDepth
 	if codec == "opus" {
@@ -749,7 +686,7 @@ func (s *Server) addClientToStream(c *client) {
 
 	s.sendMessage(c, "stream/start", streamStart)
 
-	// Send metadata via server/state per spec
+	// server/state carries the initial metadata snapshot per spec.
 	title, artist, album := s.audioSource.Metadata()
 	serverState := protocol.ServerStateMessage{
 		Metadata: &protocol.MetadataState{
@@ -762,7 +699,7 @@ func (s *Server) addClientToStream(c *client) {
 
 	s.sendMessage(c, "server/state", serverState)
 
-	// Send group/update per spec
+	// group/update is required by spec even when we host a single implicit group.
 	groupID := s.serverID
 	playbackState := "playing"
 	groupUpdate := protocol.GroupUpdate{
@@ -773,7 +710,6 @@ func (s *Server) addClientToStream(c *client) {
 	s.sendMessage(c, "group/update", groupUpdate)
 }
 
-// notifyStreamEnd sends stream/end to all connected player clients
 func (s *Server) notifyStreamEnd() {
 	streamEnd := protocol.StreamEnd{
 		Roles: []string{"player"},
@@ -789,7 +725,6 @@ func (s *Server) notifyStreamEnd() {
 	}
 }
 
-// removeClient removes a client
 func (s *Server) removeClient(c *client) {
 	s.clientsMu.Lock()
 	defer s.clientsMu.Unlock()
@@ -806,12 +741,13 @@ func (s *Server) removeClient(c *client) {
 	close(c.done)
 }
 
-// strPtr returns a pointer to the given string
 func strPtr(s string) *string {
 	return &s
 }
 
-// negotiateCodec selects the best codec based on client capabilities
+// negotiateCodec picks PCM at the source's native rate when advertised
+// (lossless hi-res), then falls through to Opus for bandwidth savings, then
+// PCM as a last resort.
 func (s *Server) negotiateCodec(c *client) string {
 	if c.Capabilities == nil {
 		return "pcm"
@@ -819,14 +755,12 @@ func (s *Server) negotiateCodec(c *client) string {
 
 	sourceRate := s.audioSource.SampleRate()
 
-	// Prioritize PCM at native rate
 	for _, format := range c.Capabilities.SupportedFormats {
 		if format.Codec == "pcm" && format.SampleRate == sourceRate && format.BitDepth == DefaultBitDepth {
 			return "pcm"
 		}
 	}
 
-	// Consider compressed codecs
 	for _, format := range c.Capabilities.SupportedFormats {
 		if format.Codec == "opus" {
 			return "opus"
@@ -836,7 +770,6 @@ func (s *Server) negotiateCodec(c *client) string {
 	return "pcm"
 }
 
-// sendMessage sends a JSON message to a client
 func (s *Server) sendMessage(c *client, msgType string, payload interface{}) error {
 	msg := protocol.Message{
 		Type:    msgType,
@@ -851,7 +784,6 @@ func (s *Server) sendMessage(c *client, msgType string, payload interface{}) err
 	}
 }
 
-// sendBinary sends binary data to a client
 func (s *Server) sendBinary(c *client, data []byte) error {
 	select {
 	case c.sendChan <- data:
@@ -861,7 +793,7 @@ func (s *Server) sendBinary(c *client, data []byte) error {
 	}
 }
 
-// getClockMicros returns the server clock in microseconds
+// getClockMicros returns server uptime in microseconds (monotonic, not wall clock).
 func (s *Server) getClockMicros() int64 {
 	return time.Since(s.clockStart).Microseconds()
 }
@@ -877,13 +809,14 @@ func (s *Server) hasRole(c *client, role string) bool {
 	return false
 }
 
-// activateRoles returns the active roles based on client's supported roles
-// Only activates roles that this server actually implements.
-// Preserves input order (first occurrence of each role family).
+// activateRoles filters a client's advertised role list down to the roles this
+// server actually implements, keeping only the first version of each role family
+// so "player@v1" wins over a later "player@v2" entry in the same hello.
+//
+// Implemented: player (audio streaming), metadata (track info via server/state).
+// Not implemented: visualizer, artwork, controller.
 func (s *Server) activateRoles(supportedRoles []string) []string {
-	// Track which families we've seen to avoid duplicates
 	seen := make(map[string]bool)
-	// Result preserves input order
 	result := make([]string, 0, len(supportedRoles))
 
 	for _, role := range supportedRoles {
@@ -893,15 +826,10 @@ func (s *Server) activateRoles(supportedRoles []string) []string {
 			family = role[:idx]
 		}
 
-		// Only keep the first (highest priority) version of each role
 		if seen[family] {
 			continue
 		}
 
-		// Only activate roles this server actually implements
-		// - player: audio streaming (implemented)
-		// - metadata: track info via server/state (implemented)
-		// - visualizer, artwork, controller: NOT implemented
 		switch family {
 		case "player", "metadata":
 			seen[family] = true
@@ -912,7 +840,8 @@ func (s *Server) activateRoles(supportedRoles []string) []string {
 	return result
 }
 
-// createAudioChunk creates a binary audio chunk message
+// createAudioChunk packs timestamp + payload into a Sendspin binary frame:
+// [1 byte message type][8 byte big-endian timestamp (µs)][audio bytes].
 func createAudioChunk(timestamp int64, audioData []byte) []byte {
 	chunk := make([]byte, 1+8+len(audioData))
 	chunk[0] = AudioChunkMessageType

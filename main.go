@@ -34,10 +34,9 @@ var (
 func main() {
 	flag.Parse()
 
-	// Determine if we should use TUI or streaming logs
+	// Use TUI if not explicitly disabled; -stream-logs is an alias for -no-tui
 	useTUI := !(*noTUI || *streamLogs)
 
-	// Set up logging
 	f, err := os.OpenFile(*logFile, os.O_RDWR|os.O_CREATE|os.O_APPEND, 0600)
 	if err != nil {
 		log.Fatalf("error opening log file: %v", err)
@@ -45,15 +44,12 @@ func main() {
 	defer func() { _ = f.Close() }()
 
 	if useTUI {
-		// TUI mode: log only to file
+		// Log to file only when TUI is running; otherwise the log would stomp the TUI
 		log.SetOutput(f)
 	} else {
-		// Streaming logs mode: log to both stdout and file
-		multiWriter := io.MultiWriter(os.Stdout, f)
-		log.SetOutput(multiWriter)
+		log.SetOutput(io.MultiWriter(os.Stdout, f))
 	}
 
-	// Determine player name
 	playerName := *name
 	if playerName == "" {
 		hostname, err := os.Hostname()
@@ -63,7 +59,7 @@ func main() {
 		playerName = fmt.Sprintf("%s-sendspin-player", hostname)
 	}
 
-	// Handle shutdown signals early so discovery can use sigChan
+	// Set up sigChan before discovery so the select loop can catch Ctrl+C during browsing
 	sigChan := make(chan os.Signal, 1)
 	signal.Notify(sigChan, syscall.SIGINT, syscall.SIGTERM)
 
@@ -72,7 +68,6 @@ func main() {
 		log.Printf("TUI disabled - logging to file for debugging")
 	}
 
-	// TUI setup
 	var tuiProg *tea.Program
 	var volumeCtrl *ui.VolumeControl
 
@@ -85,14 +80,12 @@ func main() {
 		go tuiProg.Run()
 	}
 
-	// Helper to update TUI
 	updateTUI := func(msg ui.StatusMsg) {
 		if tuiProg != nil {
 			tuiProg.Send(msg)
 		}
 	}
 
-	// Handle server discovery if no manual server specified
 	var serverAddress string
 	if *serverAddr == "" {
 		log.Printf("Searching for servers via mDNS (press Ctrl+C to quit)...")
@@ -116,7 +109,6 @@ func main() {
 		serverAddress = *serverAddr
 	}
 
-	// Create player with callbacks for TUI
 	config := sendspin.PlayerConfig{
 		ServerAddr: serverAddress,
 		PlayerName: playerName,
@@ -159,24 +151,20 @@ func main() {
 		log.Fatalf("Failed to create player: %v", err)
 	}
 
-	// Connect to server
 	if err := player.Connect(); err != nil {
 		log.Fatalf("Connection failed: %v", err)
 	}
 
 	log.Printf("Connected to server: %s", serverAddress)
 
-	// Start volume control handler if TUI is enabled
 	if volumeCtrl != nil {
 		go handleVolumeControl(player, volumeCtrl)
 	}
 
-	// Start stats update loop for TUI
 	if tuiProg != nil {
 		go statsUpdateLoop(player, updateTUI)
 	}
 
-	// Wait for quit signal from TUI or OS
 	if volumeCtrl != nil {
 		select {
 		case <-volumeCtrl.Quit:
@@ -189,7 +177,6 @@ func main() {
 		log.Printf("Shutdown signal received")
 	}
 
-	// Close player
 	if err := player.Close(); err != nil {
 		log.Printf("Error closing player: %v", err)
 	}
@@ -197,7 +184,6 @@ func main() {
 	log.Printf("Player stopped")
 }
 
-// handleVolumeControl processes volume changes from TUI
 func handleVolumeControl(player *sendspin.Player, volumeCtrl *ui.VolumeControl) {
 	for {
 		select {
@@ -211,7 +197,6 @@ func handleVolumeControl(player *sendspin.Player, volumeCtrl *ui.VolumeControl) 
 	}
 }
 
-// statsUpdateLoop periodically updates TUI with playback statistics
 func statsUpdateLoop(player *sendspin.Player, updateTUI func(ui.StatusMsg)) {
 	ticker := time.NewTicker(500 * time.Millisecond)
 	defer ticker.Stop()

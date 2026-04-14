@@ -13,7 +13,6 @@ import (
 	"github.com/gen2brain/malgo"
 )
 
-// Malgo output implementation using malgo/miniaudio library
 type Malgo struct {
 	ctx        context.Context
 	cancel     context.CancelFunc
@@ -99,7 +98,6 @@ func (rb *RingBuffer) Free() int {
 	return rb.size - rb.count
 }
 
-// NewMalgo creates a new Malgo output
 func NewMalgo() Output {
 	ctx, cancel := context.WithCancel(context.Background())
 
@@ -111,7 +109,6 @@ func NewMalgo() Output {
 	}
 }
 
-// Open initializes the output device with specified format
 func (m *Malgo) Open(sampleRate, channels, bitDepth int) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -131,7 +128,6 @@ func (m *Malgo) Open(sampleRate, channels, bitDepth int) error {
 		}
 	}
 
-	// Create malgo context if needed
 	if m.malgoCtx == nil {
 		ctx, err := malgo.InitContext(nil, malgo.ContextConfig{}, nil)
 		if err != nil {
@@ -140,7 +136,6 @@ func (m *Malgo) Open(sampleRate, channels, bitDepth int) error {
 		m.malgoCtx = ctx
 	}
 
-	// Map bit depth to malgo format
 	var format malgo.FormatType
 	switch bitDepth {
 	case 16:
@@ -157,14 +152,12 @@ func (m *Malgo) Open(sampleRate, channels, bitDepth int) error {
 	bufferSamples := (sampleRate * channels * 80) / 1000
 	m.ringBuffer = NewRingBuffer(bufferSamples)
 
-	// Configure device
 	deviceConfig := malgo.DefaultDeviceConfig(malgo.Playback)
 	deviceConfig.Playback.Format = format
 	deviceConfig.Playback.Channels = uint32(channels)
 	deviceConfig.SampleRate = uint32(sampleRate)
 	deviceConfig.Alsa.NoMMap = 1
 
-	// Set up callbacks
 	onSamples := func(pOutputSample, pInputSamples []byte, frameCount uint32) {
 		m.dataCallback(pOutputSample, frameCount)
 	}
@@ -173,13 +166,11 @@ func (m *Malgo) Open(sampleRate, channels, bitDepth int) error {
 		Data: onSamples,
 	}
 
-	// Initialize device
 	device, err := malgo.InitDevice(m.malgoCtx.Context, deviceConfig, deviceCallbacks)
 	if err != nil {
 		return fmt.Errorf("failed to initialize playback device: %w", err)
 	}
 
-	// Start device
 	if err := device.Start(); err != nil {
 		device.Uninit()
 		return fmt.Errorf("failed to start device: %w", err)
@@ -210,7 +201,6 @@ func (m *Malgo) Write(samples []int32) error {
 		maxWait       = 50 * time.Millisecond
 	)
 
-	// Apply volume and mute
 	volumedSamples := applyVolume(samples, m.volume, m.muted)
 
 	written := 0
@@ -237,10 +227,8 @@ func (m *Malgo) dataCallback(pOutput []byte, frameCount uint32) {
 	totalSamples := int(frameCount) * m.channels
 	samples := make([]int32, totalSamples)
 
-	// Read from ring buffer
 	m.ringBuffer.Read(samples)
 
-	// Convert int32 to output format
 	switch m.bitDepth {
 	case 16:
 		m.write16Bit(pOutput, samples)
@@ -254,7 +242,6 @@ func (m *Malgo) dataCallback(pOutput []byte, frameCount uint32) {
 // write16Bit converts int32 samples to 16-bit output
 func (m *Malgo) write16Bit(output []byte, samples []int32) {
 	for i, sample := range samples {
-		// Convert 24-bit (int32) to 16-bit
 		sample16 := audio.SampleToInt16(sample)
 		output[i*2] = byte(sample16)
 		output[i*2+1] = byte(sample16 >> 8)
@@ -264,7 +251,6 @@ func (m *Malgo) write16Bit(output []byte, samples []int32) {
 // write24Bit converts int32 samples to 24-bit output (3 bytes per sample)
 func (m *Malgo) write24Bit(output []byte, samples []int32) {
 	for i, sample := range samples {
-		// Pack 24-bit value (little-endian)
 		output[i*3] = byte(sample)
 		output[i*3+1] = byte(sample >> 8)
 		output[i*3+2] = byte(sample >> 16)
@@ -274,8 +260,8 @@ func (m *Malgo) write24Bit(output []byte, samples []int32) {
 // write32Bit converts int32 samples to 32-bit output
 func (m *Malgo) write32Bit(output []byte, samples []int32) {
 	for i, sample := range samples {
-		// Write as 32-bit (little-endian), left-shifted for proper 24-bit representation
-		sample32 := sample << 8 // Shift 24-bit value to upper bits of 32-bit container
+		// Left-shift 24-bit value to fill the upper bits of the 32-bit container
+		sample32 := sample << 8
 		output[i*4] = byte(sample32)
 		output[i*4+1] = byte(sample32 >> 8)
 		output[i*4+2] = byte(sample32 >> 16)
@@ -283,7 +269,6 @@ func (m *Malgo) write32Bit(output []byte, samples []int32) {
 	}
 }
 
-// Close releases output resources
 func (m *Malgo) Close() error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -304,7 +289,7 @@ func (m *Malgo) Close() error {
 	return nil
 }
 
-// closeDevice stops and uninitializes the device (must hold m.mu)
+// closeDevice stops and uninitializes the device; caller must hold m.mu.
 func (m *Malgo) closeDevice() error {
 	if m.device != nil {
 		if err := m.device.Stop(); err != nil {
@@ -317,7 +302,6 @@ func (m *Malgo) closeDevice() error {
 	return nil
 }
 
-// SetVolume sets the volume (0-100)
 func (m *Malgo) SetVolume(volume int) {
 	if volume < 0 {
 		volume = 0
@@ -329,23 +313,19 @@ func (m *Malgo) SetVolume(volume int) {
 	log.Printf("Volume set to %d", volume)
 }
 
-// SetMuted sets mute state
 func (m *Malgo) SetMuted(muted bool) {
 	m.muted = muted
 	log.Printf("Muted: %v", muted)
 }
 
-// GetVolume returns current volume
 func (m *Malgo) GetVolume() int {
 	return m.volume
 }
 
-// IsMuted returns mute state
 func (m *Malgo) IsMuted() bool {
 	return m.muted
 }
 
-// formatName returns human-readable format name
 func formatName(format malgo.FormatType) string {
 	switch format {
 	case malgo.FormatS16:

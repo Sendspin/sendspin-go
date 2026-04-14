@@ -66,7 +66,6 @@ func NewScheduler(clockSync *sync.ClockSync, bufferMs int) *Scheduler {
 	}
 }
 
-// Schedule adds a buffer to the queue
 func (s *Scheduler) Schedule(buf audio.Buffer) {
 	// Convert server timestamp to local play time
 	buf.PlayAt = s.clockSync.ServerToLocalTime(buf.Timestamp)
@@ -91,7 +90,6 @@ func (s *Scheduler) Schedule(buf audio.Buffer) {
 	s.bufferMu.Unlock()
 }
 
-// Run starts the scheduler loop
 func (s *Scheduler) Run() {
 	ticker := time.NewTicker(10 * time.Millisecond)
 	defer ticker.Stop()
@@ -106,7 +104,6 @@ func (s *Scheduler) Run() {
 	}
 }
 
-// processQueue checks for buffers ready to play
 func (s *Scheduler) processQueue() {
 	s.bufferMu.Lock()
 
@@ -116,7 +113,6 @@ func (s *Scheduler) processQueue() {
 			log.Printf("Startup buffering complete: %d chunks ready", s.bufferQ.Len())
 			s.buffering = false
 		} else {
-			// Still buffering, don't start playback yet
 			s.bufferMu.Unlock()
 			return
 		}
@@ -133,14 +129,12 @@ func (s *Scheduler) processQueue() {
 			// Too early, wait
 			break
 		} else if delay < -50*time.Millisecond {
-			// Too late (>50ms), drop
 			heap.Pop(s.bufferQ)
 			s.statsMu.Lock()
 			s.stats.Dropped++
 			s.statsMu.Unlock()
 			log.Printf("Dropped late buffer: %v late", -delay)
 		} else {
-			// Ready to play (within ±50ms window)
 			heap.Pop(s.bufferQ)
 			// Unlock before sending to avoid blocking while holding lock
 			s.bufferMu.Unlock()
@@ -162,19 +156,16 @@ func (s *Scheduler) processQueue() {
 	s.bufferMu.Unlock()
 }
 
-// Output returns the output channel
 func (s *Scheduler) Output() <-chan audio.Buffer {
 	return s.output
 }
 
-// Stats returns scheduler statistics
 func (s *Scheduler) Stats() SchedulerStats {
 	s.statsMu.RLock()
 	defer s.statsMu.RUnlock()
 	return s.stats
 }
 
-// BufferDepth returns the current buffer queue depth in milliseconds
 func (s *Scheduler) BufferDepth() int {
 	s.bufferMu.Lock()
 	depth := s.bufferQ.Len() * ChunkDurationMs
@@ -182,7 +173,6 @@ func (s *Scheduler) BufferDepth() int {
 	return depth
 }
 
-// Stop stops the scheduler
 func (s *Scheduler) Stop() {
 	s.cancel()
 }
@@ -191,9 +181,8 @@ func (s *Scheduler) Stop() {
 func (s *Scheduler) Clear() {
 	s.bufferMu.Lock()
 	defer s.bufferMu.Unlock()
-	// Reset the buffer queue
 	s.bufferQ = NewBufferQueue()
-	// Re-enter buffering mode to rebuild buffer
+	// Re-enter buffering mode so playback doesn't resume mid-seek with stale timing
 	s.buffering = true
 	log.Printf("Scheduler buffers cleared, re-entering buffering mode")
 }
@@ -209,7 +198,6 @@ func NewBufferQueue() *BufferQueue {
 	return q
 }
 
-// Implement heap.Interface
 func (q *BufferQueue) Len() int { return len(q.items) }
 
 func (q *BufferQueue) Less(i, j int) bool {

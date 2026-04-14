@@ -10,13 +10,11 @@ import (
 	"gopkg.in/hraban/opus.v2"
 )
 
-// Decoder decodes audio in various formats
 type Decoder interface {
 	Decode(data []byte) ([]int32, error)
 	Close() error
 }
 
-// NewDecoder creates a decoder for the specified format
 func NewDecoder(format Format) (Decoder, error) {
 	switch format.Codec {
 	case "pcm":
@@ -30,7 +28,6 @@ func NewDecoder(format Format) (Decoder, error) {
 	}
 }
 
-// PCMDecoder decodes raw PCM (16-bit or 24-bit)
 type PCMDecoder struct {
 	bitDepth int
 }
@@ -61,7 +58,6 @@ func (d *PCMDecoder) Close() error {
 	return nil
 }
 
-// OpusDecoder decodes Opus audio
 type OpusDecoder struct {
 	decoder *opus.Decoder
 	format  Format
@@ -80,7 +76,6 @@ func NewOpusDecoder(format Format) (*OpusDecoder, error) {
 }
 
 func (d *OpusDecoder) Decode(data []byte) ([]int32, error) {
-	// Opus decoder outputs to int16 buffer
 	pcmSize := 5760 * d.format.Channels // Max frame size
 	pcm16 := make([]int16, pcmSize)
 
@@ -102,7 +97,6 @@ func (d *OpusDecoder) Close() error {
 	return nil
 }
 
-// FLACDecoder decodes FLAC audio
 type FLACDecoder struct {
 	format Format
 }
@@ -126,7 +120,6 @@ func (d *FLACDecoder) Close() error {
 	return nil
 }
 
-// DecodeBase64Header decodes a base64-encoded codec header
 func DecodeBase64Header(encoded string) ([]byte, error) {
 	return base64.StdEncoding.DecodeString(encoded)
 }

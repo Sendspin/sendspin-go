@@ -15,14 +15,12 @@ import (
 // silentLogger discards hashicorp/mdns internal logs
 var silentLogger = log.New(io.Discard, "", 0)
 
-// Config holds discovery configuration
 type Config struct {
 	ServiceName string
 	Port        int
 	ServerMode  bool // If true, advertise as _sendspin-server._tcp, otherwise _sendspin._tcp
 }
 
-// Manager handles mDNS operations
 type Manager struct {
 	config  Config
 	ctx     context.Context
@@ -30,14 +28,12 @@ type Manager struct {
 	servers chan *ServerInfo
 }
 
-// ServerInfo describes a discovered server
 type ServerInfo struct {
 	Name string
 	Host string
 	Port int
 }
 
-// NewManager creates a discovery manager
 func NewManager(config Config) *Manager {
 	ctx, cancel := context.WithCancel(context.Background())
 
@@ -49,14 +45,12 @@ func NewManager(config Config) *Manager {
 	}
 }
 
-// Advertise advertises this player via mDNS
 func (m *Manager) Advertise() error {
 	ips, err := getLocalIPs()
 	if err != nil {
 		return fmt.Errorf("failed to get local IPs: %w", err)
 	}
 
-	// Choose service type based on mode
 	serviceType := "_sendspin._tcp"
 	if m.config.ServerMode {
 		serviceType = "_sendspin-server._tcp"
@@ -90,13 +84,11 @@ func (m *Manager) Advertise() error {
 	return nil
 }
 
-// Browse searches for Sendspin servers
 func (m *Manager) Browse() error {
 	go m.browseLoop()
 	return nil
 }
 
-// browseLoop continuously browses for servers
 func (m *Manager) browseLoop() {
 	for {
 		select {
@@ -138,17 +130,14 @@ func (m *Manager) browseLoop() {
 	}
 }
 
-// Servers returns the channel of discovered servers
 func (m *Manager) Servers() <-chan *ServerInfo {
 	return m.servers
 }
 
-// Stop stops the discovery manager
 func (m *Manager) Stop() {
 	m.cancel()
 }
 
-// getLocalIPs returns local IP addresses
 func getLocalIPs() ([]net.IP, error) {
 	var ips []net.IP
 

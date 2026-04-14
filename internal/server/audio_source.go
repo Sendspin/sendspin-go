@@ -44,9 +44,7 @@ func NewAudioSource(pathOrURL string) (AudioSource, error) {
 	var source AudioSource
 	var err error
 
-	// Check if it's an HTTP(S) URL
 	if strings.HasPrefix(pathOrURL, "http://") || strings.HasPrefix(pathOrURL, "https://") {
-		// Check if it's an HLS stream (.m3u8)
 		if strings.Contains(pathOrURL, ".m3u8") {
 			log.Printf("Streaming from HLS URL: %s", pathOrURL)
 			source, err = NewFFmpegSource(pathOrURL)
@@ -61,13 +59,10 @@ func NewAudioSource(pathOrURL string) (AudioSource, error) {
 			}
 		}
 	} else {
-		// Local file
-		// Check file exists
 		if _, err := os.Stat(pathOrURL); os.IsNotExist(err) {
 			return nil, fmt.Errorf("audio file not found: %s", pathOrURL)
 		}
 
-		// Determine file type by extension
 		ext := strings.ToLower(filepath.Ext(pathOrURL))
 
 		switch ext {
@@ -117,7 +112,6 @@ func NewMP3Source(filePath string) (*MP3Source, error) {
 		return nil, fmt.Errorf("failed to decode MP3: %w", err)
 	}
 
-	// Extract filename as title
 	filename := filepath.Base(filePath)
 	title := strings.TrimSuffix(filename, filepath.Ext(filename))
 
@@ -135,8 +129,7 @@ func NewMP3Source(filePath string) (*MP3Source, error) {
 }
 
 func (s *MP3Source) Read(samples []int32) (int, error) {
-	// Read bytes from decoder (MP3 decoder outputs int16 = 2 bytes per sample)
-	numBytes := len(samples) * 2
+	numBytes := len(samples) * 2 // int16 = 2 bytes per sample
 	buf := make([]byte, numBytes)
 
 	n, err := s.decoder.Read(buf)
@@ -154,11 +147,9 @@ func (s *MP3Source) Read(samples []int32) (int, error) {
 	}
 
 	if err == io.EOF {
-		// Loop the audio - seek back to start
 		if _, seekErr := s.file.Seek(0, 0); seekErr != nil {
 			return numSamples, fmt.Errorf("failed to seek to start: %w", seekErr)
 		}
-		// Create new decoder
 		newDecoder, decErr := mp3.NewDecoder(s.file)
 		if decErr != nil {
 			return numSamples, fmt.Errorf("failed to create new decoder: %w", decErr)
@@ -207,13 +198,11 @@ func NewFLACSource(filePath string) (*FLACSource, error) {
 		return nil, fmt.Errorf("failed to decode FLAC: %w", err)
 	}
 
-	// Get stream info
 	info := stream.Info
 	sampleRate := int(info.SampleRate)
 	channels := int(info.NChannels)
 	bitDepth := int(info.BitsPerSample)
 
-	// Extract filename as title
 	filename := filepath.Base(filePath)
 	title := strings.TrimSuffix(filename, filepath.Ext(filename))
 
@@ -235,7 +224,7 @@ func NewFLACSource(filePath string) (*FLACSource, error) {
 func (s *FLACSource) Read(samples []int32) (int, error) {
 	samplesRead := 0
 
-	// First, drain any buffered samples from previous partial frame
+	// Drain any buffered samples from a previous partial frame before reading more
 	if s.frameBuffer != nil && s.frameBufferPos < len(s.frameBuffer) {
 		available := len(s.frameBuffer) - s.frameBufferPos
 		toCopy := len(samples)
@@ -247,29 +236,23 @@ func (s *FLACSource) Read(samples []int32) (int, error) {
 		samplesRead += toCopy
 		s.frameBufferPos += toCopy
 
-		// If we've filled the output buffer, we're done
 		if samplesRead >= len(samples) {
 			return samplesRead, nil
 		}
 
-		// If we've consumed all buffered samples, clear the buffer
 		if s.frameBufferPos >= len(s.frameBuffer) {
 			s.frameBuffer = nil
 			s.frameBufferPos = 0
 		}
 	}
 
-	// Read new FLAC frames as needed
 	for samplesRead < len(samples) {
-		// Parse next frame
 		frame, err := s.stream.ParseNext()
 		if err != nil {
 			if err == io.EOF {
-				// Loop back to start
 				if _, seekErr := s.file.Seek(0, 0); seekErr != nil {
 					return samplesRead, fmt.Errorf("failed to seek to start: %w", seekErr)
 				}
-				// Create new stream
 				newStream, decErr := flac.New(s.file)
 				if decErr != nil {
 					return samplesRead, fmt.Errorf("failed to create new stream: %w", decErr)
@@ -282,7 +265,6 @@ func (s *FLACSource) Read(samples []int32) (int, error) {
 			return samplesRead, err
 		}
 
-		// Convert entire frame to int32 24-bit range
 		frameSize := int(frame.BlockSize) * s.channels
 		frameSamples := make([]int32, frameSize)
 		frameIdx := 0
@@ -314,7 +296,6 @@ func (s *FLACSource) Read(samples []int32) (int, error) {
 			}
 		}
 
-		// Copy as much as we can to the output buffer
 		remaining := len(samples) - samplesRead
 		toCopy := frameSize
 		if toCopy > remaining {
@@ -324,7 +305,7 @@ func (s *FLACSource) Read(samples []int32) (int, error) {
 		copy(samples[samplesRead:], frameSamples[:toCopy])
 		samplesRead += toCopy
 
-		// If there are leftover samples, buffer them for next Read()
+		// Buffer leftover samples — FLAC frames don't align with chunk boundaries
 		if toCopy < frameSize {
 			s.frameBuffer = frameSamples
 			s.frameBufferPos = toCopy
@@ -354,9 +335,7 @@ type HTTPMP3Source struct {
 	title      string
 }
 
-// NewHTTPMP3Source creates a new HTTP MP3 streaming source
 func NewHTTPMP3Source(url string) (*HTTPMP3Source, error) {
-	// Make HTTP GET request with timeout
 	client := &http.Client{Timeout: 30 * time.Second}
 	resp, err := client.Get(url)
 	if err != nil {
@@ -368,7 +347,6 @@ func NewHTTPMP3Source(url string) (*HTTPMP3Source, error) {
 		return nil, fmt.Errorf("HTTP error: %s", resp.Status)
 	}
 
-	// Create MP3 decoder from response body
 	decoder, err := mp3.NewDecoder(resp.Body)
 	if err != nil {
 		resp.Body.Close()
@@ -388,7 +366,6 @@ func NewHTTPMP3Source(url string) (*HTTPMP3Source, error) {
 }
 
 func (s *HTTPMP3Source) Read(samples []int32) (int, error) {
-	// Read bytes from decoder
 	numBytes := len(samples) * 2 // int16 = 2 bytes
 	buf := make([]byte, numBytes)
 
@@ -432,8 +409,7 @@ type FFmpegSource struct {
 	title      string
 }
 
-// NewFFmpegSource creates a new ffmpeg-based audio source
-// Uses ffmpeg to decode HLS/m3u8 streams and output raw PCM
+// NewFFmpegSource creates an ffmpeg-backed source for HLS and other streaming URLs.
 func NewFFmpegSource(url string) (*FFmpegSource, error) {
 	// Validate URL scheme to prevent command injection
 	if !strings.HasPrefix(url, "http://") && !strings.HasPrefix(url, "https://") {
@@ -445,16 +421,9 @@ func NewFFmpegSource(url string) (*FFmpegSource, error) {
 		return nil, fmt.Errorf("ffmpeg not found in PATH: %w (install with: brew install ffmpeg)", err)
 	}
 
-	// Fixed output format for consistency
 	sampleRate := 48000
 	channels := 2
 
-	// Start ffmpeg to decode the stream
-	// -i <url>: input URL
-	// -f s16le: output format (signed 16-bit little-endian PCM)
-	// -ar 48000: output sample rate
-	// -ac 2: output channels (stereo)
-	// -: output to stdout
 	cmd := exec.Command("ffmpeg",
 		"-loglevel", "error", // Only show errors
 		"-i", url,
@@ -463,13 +432,11 @@ func NewFFmpegSource(url string) (*FFmpegSource, error) {
 		"-ac", fmt.Sprintf("%d", channels),
 		"-")
 
-	// Get stdout pipe
 	stdout, err := cmd.StdoutPipe()
 	if err != nil {
 		return nil, fmt.Errorf("failed to get ffmpeg stdout: %w", err)
 	}
 
-	// Start ffmpeg process
 	if err := cmd.Start(); err != nil {
 		return nil, fmt.Errorf("failed to start ffmpeg: %w", err)
 	}
@@ -488,7 +455,6 @@ func NewFFmpegSource(url string) (*FFmpegSource, error) {
 }
 
 func (s *FFmpegSource) Read(samples []int32) (int, error) {
-	// Read raw PCM bytes from ffmpeg stdout
 	numBytes := len(samples) * 2 // int16 = 2 bytes
 	buf := make([]byte, numBytes)
 
@@ -533,12 +499,10 @@ type ResampledSource struct {
 	outputBuffer []int32
 }
 
-// NewResampledSource creates a resampling wrapper around an audio source
 func NewResampledSource(source AudioSource, targetRate int) *ResampledSource {
 	inputRate := source.SampleRate()
 	channels := source.Channels()
 
-	// Calculate buffer sizes for 100ms chunks
 	inputSamples := (inputRate * channels * 100) / 1000
 	outputSamples := (targetRate * channels * 100) / 1000
 
@@ -552,19 +516,16 @@ func NewResampledSource(source AudioSource, targetRate int) *ResampledSource {
 }
 
 func (r *ResampledSource) Read(samples []int32) (int, error) {
-	// Calculate how many input samples we need
 	neededInput := r.resampler.InputSamplesNeeded(len(samples))
 	if neededInput > len(r.inputBuffer) {
 		neededInput = len(r.inputBuffer)
 	}
 
-	// Read from underlying source
 	n, err := r.source.Read(r.inputBuffer[:neededInput])
 	if err != nil && err != io.EOF {
 		return 0, err
 	}
 
-	// Resample to output
 	outputSamples := r.resampler.Resample(r.inputBuffer[:n], samples)
 
 	return outputSamples, nil

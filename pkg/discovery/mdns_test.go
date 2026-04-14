@@ -44,7 +44,6 @@ func TestNewManager(t *testing.T) {
 		t.Error("cancel should not be nil")
 	}
 
-	// Clean up
 	manager.Stop()
 }
 
@@ -73,14 +72,12 @@ func TestManagerServersChannel(t *testing.T) {
 	manager := NewManager(config)
 	defer manager.Stop()
 
-	// Get the servers channel
 	serversChan := manager.Servers()
 
 	if serversChan == nil {
 		t.Fatal("Servers() returned nil channel")
 	}
 
-	// Verify it's the same channel
 	if serversChan != manager.servers {
 		t.Error("Servers() should return the manager's servers channel")
 	}
@@ -95,10 +92,8 @@ func TestManagerStop(t *testing.T) {
 
 	manager := NewManager(config)
 
-	// Stop the manager
 	manager.Stop()
 
-	// Verify context is cancelled
 	select {
 	case <-manager.ctx.Done():
 		// Expected - context should be cancelled
@@ -121,7 +116,6 @@ func TestGetLocalIPs(t *testing.T) {
 		t.Error("getLocalIPs returned nil slice")
 	}
 
-	// Verify all returned IPs are IPv4
 	for _, ip := range ips {
 		if ip.To4() == nil {
 			t.Errorf("getLocalIPs returned non-IPv4 address: %v", ip)

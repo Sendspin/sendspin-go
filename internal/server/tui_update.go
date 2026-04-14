@@ -2,7 +2,6 @@
 // ABOUTME: Functions to send server state updates to TUI
 package server
 
-// updateTUI sends current server state to TUI
 func (s *Server) updateTUI() {
 	if s.tui == nil {
 		return
@@ -11,7 +10,6 @@ func (s *Server) updateTUI() {
 	s.clientsMu.RLock()
 	defer s.clientsMu.RUnlock()
 
-	// Build client list
 	clients := make([]ClientInfo, 0, len(s.clients))
 	for _, client := range s.clients {
 		client.mu.RLock()
@@ -27,7 +25,6 @@ func (s *Server) updateTUI() {
 		})
 	}
 
-	// Get audio title
 	audioTitle := "Test Tone (440Hz)"
 	if s.audioEngine != nil && s.audioEngine.source != nil {
 		title, artist, _ := s.audioEngine.source.Metadata()
@@ -38,7 +35,6 @@ func (s *Server) updateTUI() {
 		}
 	}
 
-	// Send update
 	s.tui.Update(ServerStatus{
 		Name:       s.config.Name,
 		Port:       s.config.Port,

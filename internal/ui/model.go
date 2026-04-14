@@ -58,12 +58,10 @@ type Model struct {
 	volumeCtrl *VolumeControl
 }
 
-// Init initializes the model
 func (m Model) Init() tea.Cmd {
 	return nil
 }
 
-// Update handles messages
 func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case tea.KeyMsg:
@@ -78,7 +76,6 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
-// View renders the TUI
 func (m Model) View() string {
 	if m.width == 0 {
 		return "Loading..."
@@ -99,7 +96,6 @@ func (m Model) View() string {
 	return s
 }
 
-// renderHeader renders connection and sync status
 func (m Model) renderHeader() string {
 	connStatus := "Disconnected"
 	if m.connected {
@@ -135,7 +131,6 @@ func (m Model) renderHeader() string {
 	return title + statusLine + syncLine + separator
 }
 
-// renderStreamInfo renders current stream and metadata
 func (m Model) renderStreamInfo() string {
 	width := m.width
 	if width < 60 {
@@ -168,7 +163,6 @@ func (m Model) renderStreamInfo() string {
 	return s
 }
 
-// renderControls renders volume and buffer status
 func (m Model) renderControls() string {
 	width := m.width
 	if width < 60 {
@@ -193,7 +187,6 @@ func (m Model) renderControls() string {
 	return s
 }
 
-// renderStats renders playback statistics
 func (m Model) renderStats() string {
 	width := m.width
 	if width < 60 {
@@ -209,7 +202,6 @@ func (m Model) renderStats() string {
 	return separator + statsLine + emptyLine
 }
 
-// renderHelp renders keyboard shortcuts
 func (m Model) renderHelp() string {
 	width := m.width
 	if width < 60 {
@@ -224,7 +216,6 @@ func (m Model) renderHelp() string {
 	return helpLine + bottom
 }
 
-// renderDebug renders debug information
 func (m Model) renderDebug() string {
 	width := m.width
 	if width < 60 {
@@ -246,11 +237,9 @@ func (m Model) renderDebug() string {
 	return debugTitle + goroutineLine + memLine + clockLine
 }
 
-// handleKey handles keyboard input
 func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	switch msg.String() {
 	case "q", "ctrl+c":
-		// Send quit signal to player
 		if m.volumeCtrl != nil {
 			select {
 			case m.volumeCtrl.Quit <- QuitMsg{}:
@@ -265,7 +254,6 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			if m.volume > 100 {
 				m.volume = 100
 			}
-			// Send volume change to player via channel
 			if m.volumeCtrl != nil {
 				select {
 				case m.volumeCtrl.Changes <- VolumeChangeMsg{Volume: m.volume, Muted: m.muted}:
@@ -280,7 +268,6 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			if m.volume < 0 {
 				m.volume = 0
 			}
-			// Send volume change to player via channel
 			if m.volumeCtrl != nil {
 				select {
 				case m.volumeCtrl.Changes <- VolumeChangeMsg{Volume: m.volume, Muted: m.muted}:
@@ -306,7 +293,6 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
-// applyStatus updates model from status message
 func (m *Model) applyStatus(msg StatusMsg) {
 	if msg.Connected != nil {
 		m.connected = *msg.Connected
@@ -349,7 +335,6 @@ func (m *Model) applyStatus(msg StatusMsg) {
 	m.memSys = msg.MemSys
 }
 
-// StatusMsg updates TUI state
 type StatusMsg struct {
 	Connected   *bool
 	ServerName  string
@@ -374,16 +359,13 @@ type StatusMsg struct {
 	MemSys      uint64
 }
 
-// VolumeChangeMsg requests a volume change
 type VolumeChangeMsg struct {
 	Volume int
 	Muted  bool
 }
 
-// QuitMsg signals the player should quit
 type QuitMsg struct{}
 
-// Utility functions
 func renderBar(value, max, width int) string {
 	filled := (value * width) / max
 	return strings.Repeat("█", filled) + strings.Repeat("░", width-filled)

@@ -9,12 +9,10 @@ import (
 	"github.com/Sendspin/sendspin-go/pkg/audio"
 )
 
-// PCMDecoder decodes PCM audio
 type PCMDecoder struct {
 	bitDepth int
 }
 
-// NewPCM creates a new PCM decoder
 func NewPCM(format audio.Format) (Decoder, error) {
 	if format.Codec != "pcm" {
 		return nil, fmt.Errorf("invalid codec for PCM decoder: %s", format.Codec)
@@ -29,10 +27,8 @@ func NewPCM(format audio.Format) (Decoder, error) {
 	}, nil
 }
 
-// Decode converts PCM bytes to int32 samples
 func (d *PCMDecoder) Decode(data []byte) ([]int32, error) {
 	if d.bitDepth == 24 {
-		// 24-bit PCM: 3 bytes per sample
 		numSamples := len(data) / 3
 		samples := make([]int32, numSamples)
 		for i := 0; i < numSamples; i++ {
@@ -41,7 +37,6 @@ func (d *PCMDecoder) Decode(data []byte) ([]int32, error) {
 		}
 		return samples, nil
 	} else {
-		// 16-bit PCM: 2 bytes per sample (default)
 		numSamples := len(data) / 2
 		samples := make([]int32, numSamples)
 		for i := 0; i < numSamples; i++ {
@@ -52,7 +47,6 @@ func (d *PCMDecoder) Decode(data []byte) ([]int32, error) {
 	}
 }
 
-// Close releases resources
 func (d *PCMDecoder) Close() error {
 	return nil
 }

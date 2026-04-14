@@ -38,13 +38,13 @@ SupportFormats: []protocol.AudioFormat{
 - Server default: 24-bit (`pkg/resonate/server.go:32`)
 - Player supports: 16-bit and 24-bit (`pkg/audio/decode/pcm.go:23-24`)
 - Internal representation: int32 for full 24-bit range (`pkg/audio/types.go:11-12`)
-- Audio output: Converts to 16-bit for device (`pkg/audio/output/oto.go:100-103`)
+- Audio output: Full 24-bit support via malgo (`pkg/audio/output/malgo.go`)
 
 **Sample Rate Pipeline:**
 - Source: Any rate (192kHz default for TestTone)
 - Encoder: Opus requires 48kHz, PCM supports any rate
 - Decoder: PCM supports any rate, Opus fixed at 48kHz
-- Output: oto library accepts any sample rate
+- Output: malgo backend accepts any sample rate and handles format reinitialization
 
 ---
 
@@ -97,28 +97,14 @@ Expected: Server resamples to 48kHz and sends Opus
 Actual: Server sends 192kHz PCM (no resampling)
 ```
 
-**🟡 Warning: Oto Output Limitation**
+**✅ Audio Output: Malgo with Full 24-bit Support**
 
-The audio output uses oto library which:
-- Only supports 16-bit output (`oto.FormatSignedInt16LE`)
-- Accepts any sample rate but resamples internally to device native rate
-- **24-bit samples are downsampled to 16-bit** (`pkg/audio/output/oto.go:100-103`)
+The audio output uses malgo library (via miniaudio) which:
+- Supports 16-bit, 24-bit, and 32-bit output natively
+- Handles format reinitialization for format changes
+- Preserves full 24-bit pipeline all the way to device playback
 
-This means the full hi-res pipeline (24-bit) is preserved until final output, but playback is 16-bit.
-
-**🟡 Warning: Oto Context Cannot Be Reinitialized**
-
-From `pkg/audio/output/oto.go:51-56`:
-```go
-// If format changed, we can't reinitialize oto (it only allows one context per process)
-// Log a warning but continue using the existing context
-if o.otoCtx != nil {
-    log.Printf("Warning: format change detected (%dHz %dch -> %dHz %dch) but oto doesn't support reinitialization. Continuing with existing context.")
-    return nil
-}
-```
-
-Impact: If stream format changes mid-session, player continues with original format.
+This means hi-res samples maintain full resolution through the entire pipeline.
 
 ---
 
@@ -208,7 +194,7 @@ done
 # (Would require server restart currently)
 
 # Expected: Player handles format change gracefully
-# Actual: Oto can't reinitialize - player continues with 48kHz
+# Actual: Malgo reinitializes the device cleanly for the new format
 ```
 
 **Test 4: Bit Depth Verification**
@@ -254,34 +240,19 @@ if format.Codec == "opus" {
 
 ---
 
-### Issue 2: 16-bit Output Limitation 🟡
+### Issue 2: Output Format Support ✅ RESOLVED
 
-**Location:** `pkg/audio/output/oto.go:62`
+**Previous Issue:** oto library only supported 16-bit output format.
 
-**Current Code:**
-```go
-Format: oto.FormatSignedInt16LE,
-```
-
-**Problem:** oto library only supports 16-bit output format. Full 24-bit resolution is lost at playback.
-
-**Potential Fix:**
-- Switch to cpal library which supports 24-bit (i32 format)
-- Or accept 16-bit as "good enough" for most audio devices
-
-**Impact:** Hi-res audio benefits (dynamic range) not fully realized at speaker output.
+**Current Status:** Malgo backend now supports 24-bit and 32-bit output natively. Full hi-res resolution is preserved through device playback.
 
 ---
 
-### Issue 3: Format Switching Limitation 🟡
+### Issue 3: Format Reinitialization ✅ RESOLVED
 
-**Location:** `pkg/audio/output/oto.go:53-56`
+**Previous Issue:** oto context could only be initialized once per process; format changes required restart.
 
-**Problem:** oto context can only be initialized once per process. Format changes require restart.
-
-**Workaround:** Document that format changes require player restart.
-
-**Impact:** Poor UX if server changes stream format mid-session.
+**Current Status:** Malgo backend supports format reinitialization, allowing graceful format changes during streaming.
 
 ---
 
@@ -301,10 +272,9 @@ Format: oto.FormatSignedInt16LE,
    - Test hi-res audio file playback
    - Document any protocol differences
 
-3. **🟡 Priority 3: Document Bit Depth Behavior**
-   - Add to README: "24-bit pipeline, 16-bit output"
-   - Explain why (oto library limitation)
-   - Note that most audio devices are 16-bit anyway
+3. **✅ Complete: 24-bit Output Support**
+   - Malgo backend supports 24-bit output natively
+   - Full hi-res pipeline preserved through device playback
 
 4. **🟢 Priority 3: Add Integration Tests**
    - Create test suite for hi-res formats
@@ -314,20 +284,15 @@ Format: oto.FormatSignedInt16LE,
 
 ### Future Enhancements (v1.0+)
 
-1. **Consider cpal for 24-bit Output**
-   - Replace oto with cpal
-   - Support true 24-bit playback
-   - More control over audio device selection
-
-2. **Dynamic Format Switching**
-   - Handle format changes without restart
-   - Reinitialize audio output when needed
-   - Smooth transitions between formats
-
-3. **Configurable Quality Profiles**
+1. **Configurable Quality Profiles**
    - "Low bandwidth" → Force Opus with resampling
    - "Balanced" → Opus for >48kHz, PCM for ≤48kHz
    - "Hi-Res" → Always use PCM at source rate
+
+2. **Device Selection Control**
+   - Allow users to select audio output device
+   - Support ASIO on Windows for low-latency recording
+   - Show available devices and their capabilities
 
 ---
 
@@ -335,14 +300,14 @@ Format: oto.FormatSignedInt16LE,
 
 Before marking v1.0.0 as ready:
 
-- [ ] Verify 192kHz/24-bit PCM playback (end-to-end)
-- [ ] Verify 96kHz/24-bit PCM playback
+- [ ] Verify 192kHz/24-bit PCM playback end-to-end with malgo
+- [ ] Verify 96kHz/24-bit PCM playback with malgo
+- [ ] Verify 24-bit audio reaches device without downsampling
 - [ ] Test automatic resampling for Opus (after implementing)
 - [ ] Test with Music Assistant server
 - [ ] Test with other Resonate protocol implementations
 - [ ] Measure multi-room sync accuracy at hi-res
 - [ ] Document bandwidth requirements
-- [ ] Add warning about 16-bit output limitation
 - [ ] Create hi-res test audio files repository
 - [ ] Profile CPU usage with hi-res streams
 - [ ] Test with 5+ simultaneous hi-res clients

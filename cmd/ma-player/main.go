@@ -27,10 +27,9 @@ var (
 func main() {
 	flag.Parse()
 
-	// Determine if we should use TUI or streaming logs
+	// Use TUI if not explicitly disabled; -stream-logs is an alias for -no-tui
 	useTUI := !(*noTUI || *streamLogs)
 
-	// Set up logging
 	f, err := os.OpenFile(*logFile, os.O_RDWR|os.O_CREATE|os.O_APPEND, 0600)
 	if err != nil {
 		log.Fatalf("error opening log file: %v", err)
@@ -38,15 +37,12 @@ func main() {
 	defer func() { _ = f.Close() }()
 
 	if useTUI {
-		// TUI mode: log only to file
+		// Log to file only when TUI is running; otherwise the log would stomp the TUI
 		log.SetOutput(f)
 	} else {
-		// Streaming logs mode: log to both stdout and file
-		multiWriter := io.MultiWriter(os.Stdout, f)
-		log.SetOutput(multiWriter)
+		log.SetOutput(io.MultiWriter(os.Stdout, f))
 	}
 
-	// Determine player name
 	playerName := *name
 	if playerName == "" {
 		hostname, err := os.Hostname()
@@ -68,7 +64,6 @@ func main() {
 
 	player := app.New(config)
 
-	// Handle shutdown
 	sigChan := make(chan os.Signal, 1)
 	signal.Notify(sigChan, syscall.SIGINT, syscall.SIGTERM)
 

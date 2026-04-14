@@ -14,7 +14,6 @@ import (
 	"github.com/Sendspin/sendspin-go/pkg/sync"
 )
 
-// Scheduler manages playback timing
 type Scheduler struct {
 	clockSync    *sync.ClockSync
 	bufferQ      *BufferQueue
@@ -31,7 +30,6 @@ type Scheduler struct {
 	dropped  atomic.Int64
 }
 
-// SchedulerStats tracks scheduler metrics
 type SchedulerStats struct {
 	Received int64
 	Played   int64
@@ -44,7 +42,6 @@ func NewScheduler(clockSync *sync.ClockSync, bufferMs int) *Scheduler {
 	ctx, cancel := context.WithCancel(context.Background())
 
 	// Calculate buffer target from user config (bufferMs / ChunkDurationMs)
-	// This determines how many chunks to buffer before starting playback
 	bufferTarget := bufferMs / ChunkDurationMs
 	if bufferTarget < 1 {
 		bufferTarget = 1 // Minimum 1 chunk
@@ -62,9 +59,7 @@ func NewScheduler(clockSync *sync.ClockSync, bufferMs int) *Scheduler {
 	}
 }
 
-// Schedule adds a buffer to the queue
 func (s *Scheduler) Schedule(buf audio.Buffer) {
-	// Convert server timestamp to local play time
 	buf.PlayAt = s.clockSync.ServerToLocalTime(buf.Timestamp)
 
 	received := s.received.Add(1) - 1
@@ -84,7 +79,6 @@ func (s *Scheduler) Schedule(buf audio.Buffer) {
 	s.bufferMu.Unlock()
 }
 
-// Run starts the scheduler loop
 func (s *Scheduler) Run() {
 	ticker := time.NewTicker(10 * time.Millisecond)
 	defer ticker.Stop()
@@ -99,17 +93,14 @@ func (s *Scheduler) Run() {
 	}
 }
 
-// processQueue checks for buffers ready to play
 func (s *Scheduler) processQueue() {
 	s.bufferMu.Lock()
 
-	// Check if we're still buffering at startup
 	if s.buffering {
 		if s.bufferQ.Len() >= s.bufferTarget {
 			log.Printf("Startup buffering complete: %d chunks ready", s.bufferQ.Len())
 			s.buffering = false
 		} else {
-			// Still buffering, don't start playback yet
 			s.bufferMu.Unlock()
 			return
 		}
@@ -123,15 +114,15 @@ func (s *Scheduler) processQueue() {
 		delay := buf.PlayAt.Sub(now)
 
 		if delay > 50*time.Millisecond {
-			// Too early, wait
+			// Too early — wait for next tick
 			break
 		} else if delay < -50*time.Millisecond {
-			// Too late (>50ms), drop
+			// More than 50ms late: drop rather than play out of sync
 			heap.Pop(s.bufferQ)
 			s.dropped.Add(1)
 			log.Printf("Dropped late buffer: %v late", -delay)
 		} else {
-			// Ready to play (within ±50ms window)
+			// Within ±50ms window: ready to play
 			heap.Pop(s.bufferQ)
 			// Unlock before sending to avoid blocking while holding lock
 			s.bufferMu.Unlock()
@@ -143,7 +134,6 @@ func (s *Scheduler) processQueue() {
 				return
 			}
 
-			// Re-acquire lock for next iteration
 			s.bufferMu.Lock()
 		}
 	}
@@ -151,12 +141,10 @@ func (s *Scheduler) processQueue() {
 	s.bufferMu.Unlock()
 }
 
-// Output returns the output channel
 func (s *Scheduler) Output() <-chan audio.Buffer {
 	return s.output
 }
 
-// Stats returns scheduler statistics
 func (s *Scheduler) Stats() SchedulerStats {
 	return SchedulerStats{
 		Received: s.received.Load(),
@@ -173,7 +161,6 @@ func (s *Scheduler) BufferDepth() int {
 	return depth
 }
 
-// Stop stops the scheduler
 func (s *Scheduler) Stop() {
 	s.cancel()
 }
@@ -182,14 +169,11 @@ func (s *Scheduler) Stop() {
 func (s *Scheduler) Clear() {
 	s.bufferMu.Lock()
 	defer s.bufferMu.Unlock()
-	// Reset the buffer queue
 	s.bufferQ = NewBufferQueue()
-	// Re-enter buffering mode to rebuild buffer
 	s.buffering = true
 	log.Printf("Scheduler buffers cleared, re-entering buffering mode")
 }
 
-// BufferQueue is a priority queue for audio buffers
 type BufferQueue struct {
 	items []audio.Buffer
 }

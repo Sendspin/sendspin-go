@@ -8,7 +8,6 @@ import (
 	"time"
 )
 
-// ClockSync manages clock synchronization with drift compensation
 type ClockSync struct {
 	mu                  sync.RWMutex
 	serverLoopStartUnix int64 // Unix microseconds when server loop started
@@ -19,7 +18,6 @@ type ClockSync struct {
 	synced              bool // True after first successful sync
 }
 
-// Quality represents sync quality
 type Quality int
 
 const (
@@ -28,7 +26,6 @@ const (
 	QualityLost
 )
 
-// NewClockSync creates a new clock synchronizer
 func NewClockSync() *ClockSync {
 	return &ClockSync{
 		quality: QualityLost,
@@ -81,14 +78,12 @@ func (cs *ClockSync) ProcessSyncResponse(t1, t2, t3, t4 int64) {
 	}
 }
 
-// GetStats returns sync statistics
 func (cs *ClockSync) GetStats() (rtt int64, quality Quality) {
 	cs.mu.RLock()
 	defer cs.mu.RUnlock()
 	return cs.rtt, cs.quality
 }
 
-// CheckQuality updates quality based on time since last sync
 func (cs *ClockSync) CheckQuality() Quality {
 	cs.mu.Lock()
 	defer cs.mu.Unlock()
@@ -141,5 +136,4 @@ func SetGlobalClockSync(cs *ClockSync) {
 	globalClockSync = cs
 }
 
-// globalClockSync is the global clock synchronization instance
 var globalClockSync *ClockSync

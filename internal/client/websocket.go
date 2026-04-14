@@ -22,7 +22,6 @@ const (
 	AudioChunkMessageType = 4
 )
 
-// Config holds client configuration
 type Config struct {
 	ServerAddr        string
 	ClientID          string
@@ -35,7 +34,6 @@ type Config struct {
 	VisualizerSupport protocol.VisualizerSupport
 }
 
-// Client represents a WebSocket client
 type Client struct {
 	config Config
 	conn   *websocket.Conn
@@ -61,7 +59,6 @@ type AudioChunk struct {
 	Data      []byte // Encoded audio
 }
 
-// NewClient creates a new WebSocket client
 func NewClient(config Config) *Client {
 	ctx, cancel := context.WithCancel(context.Background())
 
@@ -78,7 +75,6 @@ func NewClient(config Config) *Client {
 	}
 }
 
-// Connect establishes WebSocket connection and performs handshake
 func (c *Client) Connect() error {
 	u := url.URL{Scheme: "ws", Host: c.config.ServerAddr, Path: "/sendspin"}
 	log.Printf("Connecting to %s", u.String())
@@ -95,13 +91,11 @@ func (c *Client) Connect() error {
 
 	conn.SetReadLimit(1 << 20) // 1MB
 
-	// Perform handshake
 	if err := c.handshake(); err != nil {
 		c.Close()
 		return fmt.Errorf("handshake failed: %w", err)
 	}
 
-	// Start message reader
 	go c.readMessages()
 
 	return nil
@@ -127,7 +121,6 @@ func (c *Client) handshake() error {
 		Payload: hello,
 	}
 
-	// Debug: Log the hello message
 	helloJSON, err := json.MarshalIndent(msg, "", "  ")
 	if err == nil {
 		log.Printf("Sending client/hello:\n%s", string(helloJSON))
@@ -137,7 +130,6 @@ func (c *Client) handshake() error {
 		return fmt.Errorf("failed to send client/hello: %w", err)
 	}
 
-	// Wait for server/hello (with timeout)
 	c.conn.SetReadDeadline(time.Now().Add(5 * time.Second))
 	_, data, err := c.conn.ReadMessage()
 	if err != nil {
@@ -156,7 +148,6 @@ func (c *Client) handshake() error {
 
 	log.Printf("Handshake complete with server")
 
-	// Send initial state
 	state := protocol.ClientState{
 		State:  "synchronized",
 		Volume: 100,
@@ -170,7 +161,6 @@ func (c *Client) handshake() error {
 	return nil
 }
 
-// sendJSON sends a JSON message
 func (c *Client) sendJSON(msg protocol.Message) error {
 	c.mu.RLock()
 	defer c.mu.RUnlock()
@@ -182,7 +172,6 @@ func (c *Client) sendJSON(msg protocol.Message) error {
 	return c.conn.WriteJSON(msg)
 }
 
-// readMessages reads and routes incoming messages
 func (c *Client) readMessages() {
 	defer c.Close()
 
@@ -209,7 +198,6 @@ func (c *Client) readMessages() {
 	}
 }
 
-// handleBinaryMessage handles audio chunks
 func (c *Client) handleBinaryMessage(data []byte) {
 	if len(data) < 9 {
 		log.Printf("Invalid binary message: too short")
@@ -236,7 +224,6 @@ func (c *Client) handleBinaryMessage(data []byte) {
 	}
 }
 
-// handleJSONMessage routes JSON messages
 func (c *Client) handleJSONMessage(data []byte) {
 	var msg protocol.Message
 	if err := json.Unmarshal(data, &msg); err != nil {
@@ -322,7 +309,6 @@ func (c *Client) handleJSONMessage(data []byte) {
 		if update.Metadata != nil {
 			log.Printf("Metadata: %s - %s (%s)", update.Metadata.Artist, update.Metadata.Title, update.Metadata.Album)
 		}
-		// Send to channel for player to handle
 		select {
 		case c.SessionUpdate <- update:
 		case <-time.After(100 * time.Millisecond):
@@ -337,7 +323,6 @@ func (c *Client) handleJSONMessage(data []byte) {
 			return
 		}
 		log.Printf("Group update: group=%s, state=%s", update.GroupID, update.PlaybackState)
-		// Send to channel for player to handle
 		select {
 		case c.SessionUpdate <- update:
 		case <-time.After(100 * time.Millisecond):
@@ -349,7 +334,7 @@ func (c *Client) handleJSONMessage(data []byte) {
 	}
 }
 
-// SendState sends a client/state message per spec
+// SendState wraps the state in the nested player: {...} structure required by spec
 func (c *Client) SendState(state protocol.ClientState) error {
 	// Wrap in nested structure per spec: client/state has player: {...}
 	payload := struct {
@@ -364,7 +349,6 @@ func (c *Client) SendState(state protocol.ClientState) error {
 	return c.sendJSON(msg)
 }
 
-// SendTimeSync sends a client/time message
 func (c *Client) SendTimeSync(t1 int64) error {
 	msg := protocol.Message{
 		Type: "client/time",
@@ -375,7 +359,6 @@ func (c *Client) SendTimeSync(t1 int64) error {
 	return c.sendJSON(msg)
 }
 
-// Close closes the connection
 func (c *Client) Close() {
 	c.mu.Lock()
 	defer c.mu.Unlock()
@@ -388,7 +371,6 @@ func (c *Client) Close() {
 	}
 }
 
-// IsConnected returns connection status
 func (c *Client) IsConnected() bool {
 	c.mu.RLock()
 	defer c.mu.RUnlock()

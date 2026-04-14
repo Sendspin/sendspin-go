@@ -39,8 +39,6 @@ func TestPCMDecode16Bit(t *testing.T) {
 		t.Fatalf("failed to create decoder: %v", err)
 	}
 
-	// PCM converts bytes to int16 samples (little-endian)
-	// Input: 4 bytes -> Output: 2 int16 samples
 	input := []byte{0x00, 0x01, 0x02, 0x03}
 	output, err := decoder.Decode(input)
 	if err != nil {
@@ -78,8 +76,6 @@ func TestPCMDecode24Bit(t *testing.T) {
 		t.Fatalf("failed to create decoder: %v", err)
 	}
 
-	// 24-bit PCM: 3 bytes per sample
-	// Input: 6 bytes -> Output: 2 samples
 	input := []byte{0x00, 0x01, 0x02, 0x03, 0x04, 0x05}
 	output, err := decoder.Decode(input)
 	if err != nil {
@@ -164,7 +160,6 @@ func TestPCMDecode_EmptyInput(t *testing.T) {
 		t.Fatalf("failed to create decoder: %v", err)
 	}
 
-	// Test with empty byte slice
 	output, err := decoder.Decode([]byte{})
 	if err != nil {
 		t.Fatalf("decode failed with empty input: %v", err)

@@ -10,7 +10,6 @@ const (
 	Min24Bit = -8388608 // -2^23
 )
 
-// Format describes audio stream format
 type Format struct {
 	Codec       string
 	SampleRate  int
@@ -19,7 +18,6 @@ type Format struct {
 	CodecHeader []byte // For FLAC, Opus, etc.
 }
 
-// Buffer represents decoded PCM audio
 type Buffer struct {
 	Timestamp int64     // Server timestamp (microseconds)
 	PlayAt    time.Time // Local play time

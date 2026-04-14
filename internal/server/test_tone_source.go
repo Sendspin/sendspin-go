@@ -7,14 +7,12 @@ import (
 	"sync"
 )
 
-// TestToneSource generates a 440Hz test tone
 type TestToneSource struct {
 	sampleIndex uint64
 	sampleMu    sync.Mutex
 	frequency   float64
 }
 
-// NewTestToneSource creates a new test tone generator
 func NewTestToneSource() *TestToneSource {
 	return &TestToneSource{
 		frequency: 440.0, // A4 note
@@ -28,16 +26,13 @@ func (s *TestToneSource) Read(samples []int32) (int, error) {
 	numSamples := len(samples) / 2 // Stereo
 
 	for i := 0; i < numSamples; i++ {
-		// Generate sine wave
 		t := float64(s.sampleIndex+uint64(i)) / float64(DefaultSampleRate)
 		sample := math.Sin(2 * math.Pi * s.frequency * t)
 
-		// Convert to 24-bit PCM (using int32)
-		// Scale to 24-bit range and apply 50% volume to avoid clipping
+		// 50% amplitude to avoid clipping on a full-scale sine
 		const max24bit = 8388607 // 2^23 - 1
 		pcmValue := int32(sample * max24bit * 0.5)
 
-		// Stereo (duplicate to both channels)
 		samples[i*2] = pcmValue
 		samples[i*2+1] = pcmValue
 	}

@@ -158,7 +158,6 @@ func (s *SweepSource) Metadata() (string, string, string) {
 func (s *SweepSource) Close() error { return nil }
 
 func main() {
-	// Parse command-line flags
 	port := flag.Int("port", 8927, "Server port")
 	mode := flag.String("mode", "chord", "Source mode: chord, sweep, single")
 	sampleRate := flag.Int("rate", 192000, "Sample rate (Hz)")
@@ -189,7 +188,6 @@ func main() {
 		log.Fatalf("Invalid mode: %s (use: chord, sweep, single)", *mode)
 	}
 
-	// Create server
 	config := sendspin.ServerConfig{
 		Port:       *port,
 		Name:       "Custom Source Example",
@@ -206,7 +204,6 @@ func main() {
 	log.Printf("Starting server on port %d...", *port)
 	log.Printf("Audio: %dHz, %d channels, 24-bit", *sampleRate, *channels)
 
-	// Start server in goroutine
 	errChan := make(chan error, 1)
 	go func() {
 		if err := server.Start(); err != nil {
@@ -214,7 +211,6 @@ func main() {
 		}
 	}()
 
-	// Wait for interrupt signal
 	log.Printf("\nServer running. Press Ctrl+C to stop")
 	sigChan := make(chan os.Signal, 1)
 	signal.Notify(sigChan, os.Interrupt, syscall.SIGTERM)

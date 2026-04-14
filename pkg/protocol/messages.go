@@ -29,7 +29,6 @@ type ClientHello struct {
 	VisualizerSupport *VisualizerSupport `json:"visualizer_support,omitempty"`
 }
 
-// DeviceInfo contains device identification
 type DeviceInfo struct {
 	ProductName     string `json:"product_name"`
 	Manufacturer    string `json:"manufacturer"`
@@ -55,7 +54,6 @@ type ArtworkV1Support struct {
 	Channels []ArtworkChannel `json:"channels"`
 }
 
-// ArtworkChannel describes a single artwork channel
 type ArtworkChannel struct {
 	Source      string `json:"source"` // "album", "artist", or "none"
 	Format      string `json:"format"` // "jpeg", "png", or "bmp"
@@ -68,7 +66,6 @@ type VisualizerV1Support struct {
 	BufferCapacity int `json:"buffer_capacity"`
 }
 
-// AudioFormat describes a supported audio format
 type AudioFormat struct {
 	Codec      string `json:"codec"`
 	Channels   int    `json:"channels"`
@@ -102,14 +99,12 @@ type ServerCommandMessage struct {
 	Player *PlayerCommand `json:"player,omitempty"`
 }
 
-// PlayerCommand is a control command for the player
 type PlayerCommand struct {
 	Command string `json:"command"` // "volume" or "mute"
 	Volume  int    `json:"volume,omitempty"`
 	Mute    bool   `json:"mute,omitempty"`
 }
 
-// StreamStartPlayer contains the audio format details
 type StreamStartPlayer struct {
 	Codec       string `json:"codec"`
 	SampleRate  int    `json:"sample_rate"`

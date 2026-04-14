@@ -14,11 +14,11 @@ type fakeAudioSource struct {
 	channels   int
 }
 
-func (f *fakeAudioSource) Read(samples []int32) (int, error)       { return len(samples), nil }
-func (f *fakeAudioSource) SampleRate() int                         { return f.sampleRate }
-func (f *fakeAudioSource) Channels() int                           { return f.channels }
-func (f *fakeAudioSource) Metadata() (string, string, string)      { return "", "", "" }
-func (f *fakeAudioSource) Close() error                            { return nil }
+func (f *fakeAudioSource) Read(samples []int32) (int, error)  { return len(samples), nil }
+func (f *fakeAudioSource) SampleRate() int                    { return f.sampleRate }
+func (f *fakeAudioSource) Channels() int                      { return f.channels }
+func (f *fakeAudioSource) Metadata() (string, string, string) { return "", "", "" }
+func (f *fakeAudioSource) Close() error                       { return nil }
 
 func newTestEngine(sampleRate, channels int) *AudioEngine {
 	return &AudioEngine{
