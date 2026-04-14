@@ -5,7 +5,6 @@ go 1.24.1
 require (
 	github.com/charmbracelet/bubbletea v1.3.10
 	github.com/charmbracelet/lipgloss v1.1.0
-	github.com/ebitengine/oto/v3 v3.4.0
 	github.com/gen2brain/malgo v0.11.21
 	github.com/google/uuid v1.6.0
 	github.com/gorilla/websocket v1.5.3
@@ -21,7 +20,6 @@ require (
 	github.com/charmbracelet/x/ansi v0.10.1 // indirect
 	github.com/charmbracelet/x/cellbuf v0.0.13-0.20250311204145-2c3ea96c31dd // indirect
 	github.com/charmbracelet/x/term v0.2.1 // indirect
-	github.com/ebitengine/purego v0.9.0 // indirect
 	github.com/erikgeiser/coninput v0.0.0-20211004153227-1c3628e74d0f // indirect
 	github.com/icza/bitio v1.1.0 // indirect
 	github.com/lucasb-eyer/go-colorful v1.2.0 // indirect
