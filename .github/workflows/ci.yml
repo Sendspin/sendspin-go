@@ -55,8 +55,6 @@ jobs:
       run: |
         go build -v -o sendspin-player .
         go build -v -o sendspin-server ./cmd/sendspin-server
-        go build -v -o ma-player ./cmd/ma-player
-        go build -v -o test-sync ./cmd/test-sync
 
   lint:
     name: Lint
@@ -104,5 +102,3 @@ jobs:
       run: |
         go build -v -o sendspin-player .
         go build -v -o sendspin-server ./cmd/sendspin-server
-        go build -v -o ma-player ./cmd/ma-player
-        go build -v -o test-sync ./cmd/test-sync
