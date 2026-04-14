@@ -10,6 +10,7 @@ A complete Sendspin Protocol implementation in Go, featuring both server and pla
 - **Precise synchronization**: Microsecond-level multi-room sync
 - **Easy to use**: Simple high-level APIs for common use cases
 - **Flexible**: Low-level component APIs for custom implementations
+- ~44mb of memory usage in Windows for sendspin-player
 
 ## Using as a Library
 
