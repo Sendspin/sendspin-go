@@ -17,13 +17,14 @@ import (
 )
 
 var (
-	port      = flag.Int("port", 8927, "WebSocket server port")
-	name      = flag.String("name", "", "Server friendly name (default: hostname-sendspin-server)")
-	logFile   = flag.String("log-file", "sendspin-server.log", "Log file path")
-	debug     = flag.Bool("debug", false, "Enable debug logging")
-	noMDNS    = flag.Bool("no-mdns", false, "Disable mDNS advertisement")
-	noTUI     = flag.Bool("no-tui", false, "Disable TUI, use streaming logs instead")
-	audioFile = flag.String("audio", "", "Audio source to stream (MP3, FLAC, HTTP URL, HLS). Default: test tone")
+	port            = flag.Int("port", 8927, "WebSocket server port")
+	name            = flag.String("name", "", "Server friendly name (default: hostname-sendspin-server)")
+	logFile         = flag.String("log-file", "sendspin-server.log", "Log file path")
+	debug           = flag.Bool("debug", false, "Enable debug logging")
+	noMDNS          = flag.Bool("no-mdns", false, "Disable mDNS advertisement")
+	noTUI           = flag.Bool("no-tui", false, "Disable TUI, use streaming logs instead")
+	audioFile       = flag.String("audio", "", "Audio source to stream (MP3, FLAC, HTTP URL, HLS). Default: test tone")
+	discoverClients = flag.Bool("discover-clients", false, "Enable server-initiated discovery: browse _sendspin._tcp and dial out to clients")
 )
 
 func main() {
@@ -71,11 +72,12 @@ func main() {
 	}
 
 	srv, err := sendspin.NewServer(sendspin.ServerConfig{
-		Port:       *port,
-		Name:       serverName,
-		Source:     source,
-		EnableMDNS: !*noMDNS,
-		Debug:      *debug,
+		Port:            *port,
+		Name:            serverName,
+		Source:          source,
+		EnableMDNS:      !*noMDNS,
+		Debug:           *debug,
+		DiscoverClients: *discoverClients,
 	})
 	if err != nil {
 		log.Fatalf("Failed to create server: %v", err)

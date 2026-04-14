@@ -8,6 +8,8 @@ import (
 	"io"
 	"log"
 	"net"
+	"strings"
+	"time"
 
 	"github.com/hashicorp/mdns"
 )
@@ -28,6 +30,7 @@ type Manager struct {
 	ctx     context.Context
 	cancel  context.CancelFunc
 	servers chan *ServerInfo
+	clients chan *ClientInfo
 }
 
 // ServerInfo describes a discovered server
@@ -35,6 +38,48 @@ type ServerInfo struct {
 	Name string
 	Host string
 	Port int
+}
+
+// ClientInfo describes a discovered client (player) advertised via
+// _sendspin._tcp.local.
+type ClientInfo struct {
+	Instance string // fully-qualified mDNS instance name (stable dedupe key)
+	Name     string // friendly name from TXT "name=" or falls back to Instance
+	Host     string // IPv4 address as a string
+	Port     int
+	Path     string // WebSocket path from TXT "path=" (default "/sendspin")
+}
+
+// clientInfoFromEntry converts an mdns.ServiceEntry into a ClientInfo.
+// Returns nil when the entry lacks a usable IPv4 address or port, or when
+// the entry does not belong to the _sendspin._tcp service (hashicorp/mdns
+// is promiscuous and forwards any multicast response received during the
+// query window, not just matches to the queried service).
+func clientInfoFromEntry(entry *mdns.ServiceEntry) *ClientInfo {
+	if entry == nil || entry.AddrV4 == nil || entry.Port == 0 {
+		return nil
+	}
+	if !strings.Contains(entry.Name, "._sendspin._tcp.") {
+		return nil
+	}
+	txt := parseTXT(entry.InfoFields)
+
+	path := txt["path"]
+	if path == "" {
+		path = "/sendspin"
+	}
+	name := txt["name"]
+	if name == "" {
+		name = entry.Name
+	}
+
+	return &ClientInfo{
+		Instance: entry.Name,
+		Name:     name,
+		Host:     entry.AddrV4.String(),
+		Port:     entry.Port,
+		Path:     path,
+	}
 }
 
 // NewManager creates a discovery manager
@@ -46,6 +91,7 @@ func NewManager(config Config) *Manager {
 		ctx:     ctx,
 		cancel:  cancel,
 		servers: make(chan *ServerInfo, 10),
+		clients: make(chan *ClientInfo, 10),
 	}
 }
 
@@ -109,6 +155,17 @@ func (m *Manager) browseLoop() {
 
 		go func() {
 			for entry := range entries {
+				// hashicorp/mdns is promiscuous: any multicast response arriving
+				// on the socket during the query window is forwarded, regardless
+				// of whether it matches Service. Filter by instance-name suffix
+				// so we don't dial Google Cast, ADB, etc.
+				if !strings.Contains(entry.Name, "._sendspin-server._tcp.") {
+					continue
+				}
+				if entry.AddrV4 == nil || entry.Port == 0 {
+					continue
+				}
+
 				server := &ServerInfo{
 					Name: entry.Name,
 					Host: entry.AddrV4.String(),
@@ -128,7 +185,7 @@ func (m *Manager) browseLoop() {
 		params := &mdns.QueryParam{
 			Service: "_sendspin-server._tcp",
 			Domain:  "local",
-			Timeout: 3,
+			Timeout: 3 * time.Second,
 			Entries: entries,
 			Logger:  silentLogger,
 		}
@@ -146,6 +203,59 @@ func (m *Manager) Servers() <-chan *ServerInfo {
 // Stop stops the discovery manager
 func (m *Manager) Stop() {
 	m.cancel()
+}
+
+// BrowseClients searches for Sendspin clients advertising _sendspin._tcp.
+func (m *Manager) BrowseClients() error {
+	go m.browseClientsLoop()
+	return nil
+}
+
+// Clients returns the channel of discovered clients.
+func (m *Manager) Clients() <-chan *ClientInfo {
+	return m.clients
+}
+
+// browseClientsLoop continuously browses for clients.
+func (m *Manager) browseClientsLoop() {
+	for {
+		select {
+		case <-m.ctx.Done():
+			return
+		default:
+		}
+
+		entries := make(chan *mdns.ServiceEntry, 10)
+
+		go func() {
+			for entry := range entries {
+				info := clientInfoFromEntry(entry)
+				if info == nil {
+					continue
+				}
+				log.Printf("Discovered client: %s at %s:%d%s",
+					info.Name, info.Host, info.Port, info.Path)
+				select {
+				case m.clients <- info:
+				case <-m.ctx.Done():
+					return
+				}
+			}
+		}()
+
+		params := &mdns.QueryParam{
+			Service: "_sendspin._tcp",
+			Domain:  "local",
+			Timeout: 3 * time.Second,
+			Entries: entries,
+			Logger:  silentLogger,
+		}
+
+		if err := mdns.Query(params); err != nil {
+			log.Printf("mdns query error: %v", err)
+		}
+		close(entries)
+	}
 }
 
 // getLocalIPs returns local IP addresses

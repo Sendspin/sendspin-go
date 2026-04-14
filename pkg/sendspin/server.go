@@ -55,6 +55,11 @@ type ServerConfig struct {
 
 	// Debug enables debug logging
 	Debug bool
+
+	// DiscoverClients enables server-initiated discovery: browse for
+	// clients advertising _sendspin._tcp and dial out to them.
+	// See https://www.sendspin-audio.com/spec/ — "server-initiated" mode.
+	DiscoverClients bool
 }
 
 // Server represents a Sendspin streaming server
@@ -82,6 +87,9 @@ type Server struct {
 
 	// mDNS discovery
 	mdnsManager *discovery.Manager
+
+	// client dialer (server-initiated discovery)
+	dialerCancel context.CancelFunc
 
 	// Control
 	stopChan   chan struct{}
@@ -184,6 +192,37 @@ func (s *Server) Start() error {
 		}
 	}
 
+	// Start server-initiated client discovery if enabled
+	if s.config.DiscoverClients {
+		if s.mdnsManager == nil {
+			// If mDNS isn't running for advertising, start a manager just for browsing.
+			s.mdnsManager = discovery.NewManager(discovery.Config{
+				ServiceName: s.config.Name,
+				Port:        s.config.Port,
+				ServerMode:  true,
+			})
+		}
+
+		if err := s.mdnsManager.BrowseClients(); err != nil {
+			log.Printf("Failed to start client discovery: %v", err)
+		} else {
+			log.Printf("Browsing for clients advertising _sendspin._tcp")
+
+			dialCtx, cancel := context.WithCancel(context.Background())
+			s.dialerCancel = cancel
+
+			dialer := newClientDialer(s.mdnsManager.Clients(), func(ctx context.Context, info *discovery.ClientInfo) error {
+				return dialAndHandle(ctx, info, s.handleConnection)
+			})
+
+			s.wg.Add(1)
+			go func() {
+				defer s.wg.Done()
+				dialer.run(dialCtx)
+			}()
+		}
+	}
+
 	// Set up HTTP handlers
 	s.mux.HandleFunc("/sendspin", s.handleWebSocket)
 
@@ -224,6 +263,12 @@ func (s *Server) Start() error {
 	s.shutdownMu.Lock()
 	s.isShutdown = true
 	s.shutdownMu.Unlock()
+
+	// Cancel in-flight client dials before stopping mDNS so they observe
+	// context cancellation ahead of the discovery channel closing.
+	if s.dialerCancel != nil {
+		s.dialerCancel()
+	}
 
 	// Stop mDNS
 	if s.mdnsManager != nil {
