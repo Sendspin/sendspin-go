@@ -151,6 +151,24 @@ func TestHighRTTRejection(t *testing.T) {
 	}
 }
 
+func TestClockSync_ServerMicrosNow(t *testing.T) {
+	cs := NewClockSync()
+
+	// Before sync, should return roughly current Unix micros
+	now1 := cs.ServerMicrosNow()
+	unixNow := time.Now().UnixMicro()
+	if abs64(now1-unixNow) > 1000000 {
+		t.Errorf("before sync: expected ~%d, got %d", unixNow, now1)
+	}
+
+	// After sync, should return server-frame time
+	cs.ProcessSyncResponse(1000, 500000, 500100, 1200)
+	now2 := cs.ServerMicrosNow()
+	if now2 == 0 {
+		t.Error("after sync: got zero")
+	}
+}
+
 func TestConcurrentAccess(t *testing.T) {
 	cs := NewClockSync()
 	SetGlobalClockSync(cs)

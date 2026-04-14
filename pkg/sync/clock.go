@@ -108,7 +108,21 @@ func (cs *ClockSync) ServerToLocalTime(serverTime int64) time.Time {
 	return time.UnixMicro(clientMicros)
 }
 
-// ServerMicrosNow returns current time in server's reference frame (µs).
+// ServerMicrosNow returns current time in server's reference frame (us).
+// This is the instance method equivalent of the deprecated package-level ServerMicrosNow().
+func (cs *ClockSync) ServerMicrosNow() int64 {
+	cs.mu.RLock()
+	defer cs.mu.RUnlock()
+
+	if !cs.filter.Synced() {
+		return time.Now().UnixMicro()
+	}
+
+	return cs.filter.ComputeServerTime(time.Now().UnixMicro())
+}
+
+// Deprecated: ServerMicrosNow returns current time in server's reference frame (us).
+// Use ClockSync.ServerMicrosNow() on the instance from Receiver.ClockSync() instead.
 func ServerMicrosNow() int64 {
 	cs := globalClockSync
 	if cs == nil {
@@ -125,10 +139,17 @@ func ServerMicrosNow() int64 {
 	return cs.filter.ComputeServerTime(time.Now().UnixMicro())
 }
 
-// SetGlobalClockSync sets the global clock sync instance
+var (
+	globalClockSync         *ClockSync
+	globalDeprecationWarned bool
+)
+
+// Deprecated: SetGlobalClockSync sets the global clock sync instance.
+// Use Receiver.ClockSync() instead for new code.
 func SetGlobalClockSync(cs *ClockSync) {
+	if !globalDeprecationWarned {
+		log.Printf("Warning: SetGlobalClockSync is deprecated, use Receiver.ClockSync() instead")
+		globalDeprecationWarned = true
+	}
 	globalClockSync = cs
 }
-
-// globalClockSync is the global clock synchronization instance
-var globalClockSync *ClockSync
