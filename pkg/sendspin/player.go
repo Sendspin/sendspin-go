@@ -142,9 +142,6 @@ func (p *Player) Connect() error {
 		return err
 	}
 
-	// Backward compat: set global clock sync
-	sync.SetGlobalClockSync(recv.ClockSync())
-
 	p.state.Connected = true
 	p.notifyStateChange()
 
