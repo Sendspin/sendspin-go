@@ -16,8 +16,8 @@ make lint         # Run golangci-lint
 
 ## Architecture
 - **pkg/** — Public library API (sendspin, audio, protocol, sync, discovery)
-- **internal/** — CLI-specific implementations (app, server, client, player, ui)
-- **cmd/** — Additional CLI entry points (ma-player, test-sync)
+- **internal/** — CLI-specific implementations (server, ui, version, discovery)
+- **cmd/** — Additional CLI entry points (sendspin-server)
 - Root `main.go` — Player CLI entry point
 
 ### Key layers
