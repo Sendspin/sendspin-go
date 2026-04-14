@@ -28,6 +28,7 @@ type Manager struct {
 	ctx     context.Context
 	cancel  context.CancelFunc
 	servers chan *ServerInfo
+	clients chan *ClientInfo
 }
 
 // ServerInfo describes a discovered server
@@ -82,6 +83,7 @@ func NewManager(config Config) *Manager {
 		ctx:     ctx,
 		cancel:  cancel,
 		servers: make(chan *ServerInfo, 10),
+		clients: make(chan *ClientInfo, 10),
 	}
 }
 
@@ -182,6 +184,59 @@ func (m *Manager) Servers() <-chan *ServerInfo {
 // Stop stops the discovery manager
 func (m *Manager) Stop() {
 	m.cancel()
+}
+
+// BrowseClients searches for Sendspin clients advertising _sendspin._tcp.
+func (m *Manager) BrowseClients() error {
+	go m.browseClientsLoop()
+	return nil
+}
+
+// Clients returns the channel of discovered clients.
+func (m *Manager) Clients() <-chan *ClientInfo {
+	return m.clients
+}
+
+// browseClientsLoop continuously browses for clients.
+func (m *Manager) browseClientsLoop() {
+	for {
+		select {
+		case <-m.ctx.Done():
+			return
+		default:
+		}
+
+		entries := make(chan *mdns.ServiceEntry, 10)
+
+		go func() {
+			for entry := range entries {
+				info := clientInfoFromEntry(entry)
+				if info == nil {
+					continue
+				}
+				log.Printf("Discovered client: %s at %s:%d%s",
+					info.Name, info.Host, info.Port, info.Path)
+				select {
+				case m.clients <- info:
+				case <-m.ctx.Done():
+					return
+				}
+			}
+		}()
+
+		params := &mdns.QueryParam{
+			Service: "_sendspin._tcp",
+			Domain:  "local",
+			Timeout: 3,
+			Entries: entries,
+			Logger:  silentLogger,
+		}
+
+		if err := mdns.Query(params); err != nil {
+			log.Printf("mdns query error: %v", err)
+		}
+		close(entries)
+	}
 }
 
 // getLocalIPs returns local IP addresses

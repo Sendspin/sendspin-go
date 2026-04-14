@@ -112,3 +112,17 @@ func TestClientInfoFromEntry(t *testing.T) {
 		})
 	}
 }
+
+func TestManagerExposesClientsChannel(t *testing.T) {
+	mgr := NewManager(Config{ServiceName: "Test", Port: 8928})
+	ch := mgr.Clients()
+	if ch == nil {
+		t.Fatal("Clients() returned nil channel")
+	}
+	// channel must be receive-only or bidirectional — just confirm we can select on it
+	select {
+	case <-ch:
+		t.Fatal("unexpected value on empty clients channel")
+	default:
+	}
+}
