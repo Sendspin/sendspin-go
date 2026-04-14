@@ -72,7 +72,6 @@ func TestServerMicrosNow(t *testing.T) {
 	cs := NewClockSync()
 	SetGlobalClockSync(cs)
 
-	// Before sync, should return Unix time
 	before := time.Now().UnixMicro()
 	serverNow1 := ServerMicrosNow()
 	after := time.Now().UnixMicro()
@@ -81,13 +80,11 @@ func TestServerMicrosNow(t *testing.T) {
 		t.Error("expected ServerMicrosNow to return Unix time before sync")
 	}
 
-	// Perform sync
 	clientNow := time.Now().UnixMicro()
 	serverLoopTime := int64(3000000)
 
 	cs.ProcessSyncResponse(clientNow-1000, serverLoopTime, serverLoopTime+50, clientNow)
 
-	// After sync, should return server-domain time
 	serverNow2 := ServerMicrosNow()
 
 	// Should be in the ballpark of serverLoopTime (within 100ms)
@@ -124,7 +121,6 @@ func TestQualityDegradation(t *testing.T) {
 		t.Errorf("expected QualityGood initially, got %v", quality)
 	}
 
-	// Simulate time passing
 	cs.mu.Lock()
 	cs.lastSync = time.Now().Add(-6 * time.Second)
 	cs.mu.Unlock()

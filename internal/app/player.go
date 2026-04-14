@@ -23,7 +23,6 @@ import (
 	"github.com/google/uuid"
 )
 
-// Config holds player configuration
 type Config struct {
 	ServerAddr string
 	Port       int
@@ -32,7 +31,6 @@ type Config struct {
 	UseTUI     bool
 }
 
-// Player represents the main player application
 type Player struct {
 	config          Config
 	client          *client.Client
@@ -53,7 +51,6 @@ type Player struct {
 	playerState     string // "idle" or "playing"
 }
 
-// New creates a new player
 func New(config Config) *Player {
 	ctx, cancel := context.WithCancel(context.Background())
 
@@ -74,13 +71,11 @@ func New(config Config) *Player {
 		artwork:     artworkDL,
 		ctx:         ctx,
 		cancel:      cancel,
-		playerState: "idle", // Start in idle state
+		playerState: "idle",
 	}
 }
 
-// Start starts the player
 func (p *Player) Start() error {
-	// Start TUI if enabled
 	if p.config.UseTUI {
 		p.volumeCtrl = ui.NewVolumeControl()
 		tuiProg, err := ui.Run(p.volumeCtrl)
@@ -90,13 +85,11 @@ func (p *Player) Start() error {
 		p.tuiProg = tuiProg
 		go p.tuiProg.Run()
 
-		// Start volume control handler
 		go p.handleVolumeControl()
 	} else {
 		log.Printf("TUI disabled - logging to file for debugging")
 	}
 
-	// Start discovery if no manual server
 	if p.config.ServerAddr == "" {
 		p.discovery = discovery.NewManager(discovery.Config{
 			ServiceName: p.config.Name,
@@ -106,22 +99,18 @@ func (p *Player) Start() error {
 		p.discovery.Advertise()
 		p.discovery.Browse()
 
-		// Wait for server discovery
 		go p.handleDiscovery()
 	} else {
-		// Connect directly
 		if err := p.connect(p.config.ServerAddr); err != nil {
 			return fmt.Errorf("connection failed: %w", err)
 		}
 	}
 
-	// Wait for context cancellation
 	<-p.ctx.Done()
 
 	return nil
 }
 
-// handleDiscovery waits for server discovery
 func (p *Player) handleDiscovery() {
 	for {
 		select {
@@ -141,7 +130,6 @@ func (p *Player) handleDiscovery() {
 	}
 }
 
-// connect establishes connection to server
 func (p *Player) connect(serverAddr string) error {
 	clientID := uuid.New().String()
 
@@ -195,19 +183,16 @@ func (p *Player) connect(serverAddr string) error {
 
 	log.Printf("Connected to server: %s", serverAddr)
 
-	// Update TUI
 	connected := true
 	p.updateTUI(ui.StatusMsg{
 		Connected:  &connected,
 		ServerName: serverAddr,
 	})
 
-	// Perform initial clock sync before starting audio handlers
 	if err := p.performInitialSync(); err != nil {
 		log.Printf("Initial clock sync failed: %v", err)
 	}
 
-	// Update TUI with sync status
 	rtt, quality := p.clockSync.GetStats()
 	p.updateTUI(ui.StatusMsg{
 		SyncOffset:  0, // No longer tracking offset, using loop-origin method
@@ -215,7 +200,6 @@ func (p *Player) connect(serverAddr string) error {
 		SyncQuality: quality,
 	})
 
-	// Start component goroutines
 	go p.handleAudioChunks()
 	go p.handleControls()
 	go p.handleStreamStart()
@@ -227,16 +211,14 @@ func (p *Player) connect(serverAddr string) error {
 	return nil
 }
 
-// performInitialSync does multiple sync rounds before audio starts
 func (p *Player) performInitialSync() error {
 	log.Printf("Performing initial clock synchronization...")
 
-	// Do 5 quick sync rounds to establish server loop origin
+	// 5 rounds to establish a stable estimate before audio starts
 	for i := 0; i < 5; i++ {
 		t1 := time.Now().UnixMicro() // Client send time (Unix µs)
 		p.client.SendTimeSync(t1)
 
-		// Wait for response with timeout
 		select {
 		case resp := <-p.client.TimeSyncResp:
 			t4 := time.Now().UnixMicro() // Client receive time (Unix µs)
@@ -246,7 +228,6 @@ func (p *Player) performInitialSync() error {
 			log.Printf("Initial sync round %d timeout", i+1)
 		}
 
-		// Brief pause between syncs
 		time.Sleep(100 * time.Millisecond)
 	}
 
@@ -256,7 +237,6 @@ func (p *Player) performInitialSync() error {
 	return nil
 }
 
-// clockSyncLoop continuously syncs clock
 func (p *Player) clockSyncLoop() {
 	ticker := time.NewTicker(1 * time.Second)
 	defer ticker.Stop()
@@ -279,7 +259,6 @@ func (p *Player) clockSyncLoop() {
 			p.client.SendTimeSync(t1)
 
 		case resp := <-p.client.TimeSyncResp:
-			// Process response asynchronously when it arrives
 			t4 := time.Now().UnixMicro() // Client receive time (Unix µs)
 			p.clockSync.ProcessSyncResponse(resp.ClientTransmitted, resp.ServerReceived, resp.ServerTransmitted, t4)
 
@@ -289,7 +268,6 @@ func (p *Player) clockSyncLoop() {
 	}
 }
 
-// handleStreamStart initializes decoder and output
 func (p *Player) handleStreamStart() {
 	for {
 		select {
@@ -303,7 +281,6 @@ func (p *Player) handleStreamStart() {
 			log.Printf("Stream starting: %s %dHz %dch %dbit",
 				start.Player.Codec, start.Player.SampleRate, start.Player.Channels, start.Player.BitDepth)
 
-			// Update TUI with stream info
 			p.updateTUI(ui.StatusMsg{
 				Codec:      start.Player.Codec,
 				SampleRate: start.Player.SampleRate,
@@ -318,7 +295,6 @@ func (p *Player) handleStreamStart() {
 				BitDepth:   start.Player.BitDepth,
 			}
 
-			// Initialize decoder
 			decoder, err := audio.NewDecoder(format)
 			if err != nil {
 				log.Printf("Failed to create decoder: %v", err)
@@ -326,7 +302,6 @@ func (p *Player) handleStreamStart() {
 			}
 			p.decoder = decoder
 
-			// Initialize output
 			if err := p.output.Open(start.Player.SampleRate, start.Player.Channels, start.Player.BitDepth); err != nil {
 				log.Printf("Failed to initialize output: %v", err)
 				continue
@@ -344,10 +319,8 @@ func (p *Player) handleStreamStart() {
 				p.scheduler.Stop()
 			}
 
-			// Create new scheduler context
 			p.schedulerCtx, p.schedulerCancel = context.WithCancel(p.ctx)
 
-			// Initialize scheduler
 			p.scheduler = player.NewScheduler(p.clockSync, p.config.BufferMs)
 			go p.scheduler.Run()
 			go p.handleScheduledAudio(p.schedulerCtx)
@@ -358,7 +331,6 @@ func (p *Player) handleStreamStart() {
 	}
 }
 
-// handleAudioChunks decodes and schedules audio
 func (p *Player) handleAudioChunks() {
 	chunkCount := 0
 	for {
@@ -379,14 +351,12 @@ func (p *Player) handleAudioChunks() {
 				continue
 			}
 
-			// Decode
 			pcm, err := p.decoder.Decode(chunk.Data)
 			if err != nil {
 				log.Printf("Decode error: %v", err)
 				continue
 			}
 
-			// Schedule
 			buf := audio.Buffer{
 				Timestamp: chunk.Timestamp,
 				Samples:   pcm,
@@ -399,7 +369,6 @@ func (p *Player) handleAudioChunks() {
 	}
 }
 
-// handleScheduledAudio plays scheduled buffers
 func (p *Player) handleScheduledAudio(ctx context.Context) {
 	for {
 		select {
@@ -414,7 +383,6 @@ func (p *Player) handleScheduledAudio(ctx context.Context) {
 	}
 }
 
-// handleControls processes server commands
 func (p *Player) handleControls() {
 	for {
 		select {
@@ -445,14 +413,12 @@ func (p *Player) handleControls() {
 	}
 }
 
-// handleMetadata updates UI with track info
 func (p *Player) handleMetadata() {
 	for {
 		select {
 		case meta := <-p.client.Metadata:
 			log.Printf("Metadata: %s - %s (%s)", meta.Artist, meta.Title, meta.Album)
 
-			// Update TUI with metadata
 			p.updateTUI(ui.StatusMsg{
 				Title:  meta.Title,
 				Artist: meta.Artist,
@@ -465,7 +431,6 @@ func (p *Player) handleMetadata() {
 	}
 }
 
-// handleSessionUpdates processes session updates and extracts metadata
 func (p *Player) handleSessionUpdates() {
 	for {
 		select {
@@ -485,7 +450,6 @@ func (p *Player) handleSessionUpdates() {
 					}
 				}
 
-				// Update TUI with metadata from session
 				p.updateTUI(ui.StatusMsg{
 					Title:       update.Metadata.Title,
 					Artist:      update.Metadata.Artist,
@@ -500,7 +464,6 @@ func (p *Player) handleSessionUpdates() {
 	}
 }
 
-// handleVolumeControl processes volume changes from TUI
 func (p *Player) handleVolumeControl() {
 	if p.volumeCtrl == nil {
 		return
@@ -518,7 +481,6 @@ func (p *Player) handleVolumeControl() {
 				p.output.SetMuted(vol.Muted)
 			}
 
-			// Send state to server
 			if p.client != nil {
 				p.client.SendState(protocol.ClientState{
 					State:  p.playerState,
@@ -538,7 +500,6 @@ func (p *Player) handleVolumeControl() {
 	}
 }
 
-// statsUpdateLoop periodically updates TUI with playback statistics
 func (p *Player) statsUpdateLoop() {
 	ticker := time.NewTicker(500 * time.Millisecond)
 	defer ticker.Stop()
@@ -553,8 +514,7 @@ func (p *Player) statsUpdateLoop() {
 	for {
 		select {
 		case <-runtimeStatsTicker.C:
-			// Collect runtime stats less frequently (every 2 seconds)
-			// to avoid GC pauses from ReadMemStats
+			// ReadMemStats triggers a GC stop-the-world; sample at 2s to cap overhead
 			var m runtime.MemStats
 			runtime.ReadMemStats(&m)
 			lastGoroutines = runtime.NumGoroutine()
@@ -568,7 +528,6 @@ func (p *Player) statsUpdateLoop() {
 				MemSys:     lastMemSys,
 			}
 
-			// Add scheduler stats if available
 			if p.scheduler != nil {
 				stats := p.scheduler.Stats()
 				bufferDepth := p.scheduler.BufferDepth()
@@ -587,7 +546,6 @@ func (p *Player) statsUpdateLoop() {
 	}
 }
 
-// Stop stops the player
 func (p *Player) Stop() {
 	p.cancel()
 
@@ -602,7 +560,6 @@ func (p *Player) Stop() {
 	}
 }
 
-// updateTUI sends a status update to the TUI if enabled
 func (p *Player) updateTUI(msg ui.StatusMsg) {
 	if p.tuiProg != nil {
 		p.tuiProg.Send(msg)

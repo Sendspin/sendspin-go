@@ -24,7 +24,6 @@ const (
 	AudioChunkMessageType = 4
 )
 
-// Config holds client configuration
 type Config struct {
 	ServerAddr          string
 	ClientID            string
@@ -36,13 +35,11 @@ type Config struct {
 	VisualizerV1Support *VisualizerV1Support
 }
 
-// Client represents a WebSocket client
 type Client struct {
 	config Config
 	conn   *websocket.Conn
 	mu     sync.RWMutex
 
-	// Message channels
 	AudioChunks  chan AudioChunk
 	ControlMsgs  chan PlayerCommand
 	TimeSyncResp chan ServerTime
@@ -52,19 +49,16 @@ type Client struct {
 	ServerState  chan ServerStateMessage
 	GroupUpdate  chan GroupUpdate
 
-	// State
 	connected bool
 	ctx       context.Context
 	cancel    context.CancelFunc
 }
 
-// AudioChunk represents a timestamped audio frame
 type AudioChunk struct {
 	Timestamp int64  // Microseconds, server clock
-	Data      []byte // Encoded audio
+	Data      []byte
 }
 
-// NewClient creates a new WebSocket client
 func NewClient(config Config) *Client {
 	ctx, cancel := context.WithCancel(context.Background())
 
@@ -100,19 +94,16 @@ func (c *Client) Connect() error {
 
 	conn.SetReadLimit(1 << 20) // 1MB
 
-	// Perform handshake
 	if err := c.handshake(); err != nil {
 		c.Close()
 		return fmt.Errorf("handshake failed: %w", err)
 	}
 
-	// Start message reader
 	go c.readMessages()
 
 	return nil
 }
 
-// handshake performs the protocol handshake
 func (c *Client) handshake() error {
 	// Build versioned role list per spec
 	roles := []string{"player@v1", "metadata@v1"}
@@ -123,7 +114,6 @@ func (c *Client) handshake() error {
 		roles = append(roles, "visualizer@v1")
 	}
 
-	// Send client/hello with versioned roles
 	hello := ClientHello{
 		ClientID:            c.config.ClientID,
 		Name:                c.config.Name,
@@ -140,7 +130,6 @@ func (c *Client) handshake() error {
 		Payload: hello,
 	}
 
-	// Debug: Log the hello message
 	helloJSON, err := json.MarshalIndent(msg, "", "  ")
 	if err == nil {
 		log.Printf("Sending client/hello:\n%s", string(helloJSON))
@@ -150,7 +139,6 @@ func (c *Client) handshake() error {
 		return fmt.Errorf("failed to send client/hello: %w", err)
 	}
 
-	// Wait for server/hello (with timeout)
 	c.conn.SetReadDeadline(time.Now().Add(5 * time.Second))
 	_, data, err := c.conn.ReadMessage()
 	if err != nil {
@@ -190,7 +178,6 @@ func (c *Client) handshake() error {
 	return nil
 }
 
-// sendJSON sends a JSON message
 func (c *Client) sendJSON(msg Message) error {
 	c.mu.RLock()
 	defer c.mu.RUnlock()
@@ -202,7 +189,6 @@ func (c *Client) sendJSON(msg Message) error {
 	return c.conn.WriteJSON(msg)
 }
 
-// readMessages reads and routes incoming messages
 func (c *Client) readMessages() {
 	defer c.Close()
 
@@ -229,7 +215,6 @@ func (c *Client) readMessages() {
 	}
 }
 
-// handleBinaryMessage handles audio chunks
 func (c *Client) handleBinaryMessage(data []byte) {
 	if len(data) < BinaryMessageHeaderSize {
 		log.Printf("Invalid binary message: too short")
@@ -366,7 +351,6 @@ func (c *Client) handleJSONMessage(data []byte) {
 	}
 }
 
-// derefString safely dereferences a string pointer
 func derefString(s *string) string {
 	if s == nil {
 		return ""
@@ -396,7 +380,6 @@ func (c *Client) SendGoodbye(reason string) error {
 	return c.sendJSON(msg)
 }
 
-// SendTimeSync sends a client/time message
 func (c *Client) SendTimeSync(t1 int64) error {
 	msg := Message{
 		Type: "client/time",
@@ -407,7 +390,6 @@ func (c *Client) SendTimeSync(t1 int64) error {
 	return c.sendJSON(msg)
 }
 
-// Close closes the connection
 func (c *Client) Close() {
 	c.mu.Lock()
 	defer c.mu.Unlock()
@@ -425,7 +407,6 @@ func (c *Client) Done() <-chan struct{} {
 	return c.ctx.Done()
 }
 
-// IsConnected returns connection status
 func (c *Client) IsConnected() bool {
 	c.mu.RLock()
 	defer c.mu.RUnlock()

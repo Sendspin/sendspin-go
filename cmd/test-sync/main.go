@@ -27,9 +27,6 @@ func main() {
 	fmt.Println("3. Match server's monotonic clock by adding offset to our timestamps")
 	fmt.Println()
 
-	// Strategy: We'll intercept time sync and add a fixed offset to our
-	// timestamps to make them match the server's monotonic clock range
-
 	config := app.Config{
 		ServerAddr: *serverAddr,
 		Name:       *name,
@@ -40,7 +37,6 @@ func main() {
 
 	fmt.Printf("Connecting to %s as '%s'...\n", *serverAddr, *name)
 
-	// Start player (this will do time sync automatically)
 	if err := player.Start(); err != nil {
 		log.Fatalf("Player error: %v", err)
 	}

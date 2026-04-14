@@ -42,9 +42,7 @@ type AudioEngine struct {
 	stopOnce sync.Once // Ensure Stop() is only called once
 }
 
-// NewAudioEngine creates a new audio engine
 func NewAudioEngine(server *Server) (*AudioEngine, error) {
-	// Create audio source
 	source, err := NewAudioSource(server.config.AudioFile)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create audio source: %w", err)
@@ -63,7 +61,6 @@ func NewAudioEngine(server *Server) (*AudioEngine, error) {
 	}, nil
 }
 
-// Start starts the audio engine
 func (e *AudioEngine) Start() {
 	log.Printf("Audio engine starting")
 
@@ -81,7 +78,6 @@ func (e *AudioEngine) Start() {
 	}
 }
 
-// Stop stops the audio engine
 func (e *AudioEngine) Stop() {
 	e.stopOnce.Do(func() {
 		close(e.stopChan)
@@ -93,15 +89,12 @@ func (e *AudioEngine) Stop() {
 	})
 }
 
-// AddClient adds a client to receive audio
 func (e *AudioEngine) AddClient(client *Client) {
 	e.clientsMu.Lock()
 	defer e.clientsMu.Unlock()
 
-	// Negotiate codec based on client capabilities
 	codec := e.negotiateCodec(client)
 
-	// Create encoder and resampler if needed
 	var opusEncoder *OpusEncoder
 	var resampler *Resampler
 	sourceRate := e.source.SampleRate()
@@ -132,7 +125,6 @@ func (e *AudioEngine) AddClient(client *Client) {
 		codec = "pcm"
 	}
 
-	// Set codec, encoder, and resampler atomically with client lock
 	client.mu.Lock()
 	client.Codec = codec
 	client.OpusEncoder = opusEncoder
@@ -144,7 +136,6 @@ func (e *AudioEngine) AddClient(client *Client) {
 	log.Printf("Audio engine: added client %s with codec %s (format: %dHz/%dbit/%dch)",
 		client.Name, codec, e.source.SampleRate(), DefaultBitDepth, e.source.Channels())
 
-	// Send stream/start message (use select to avoid blocking)
 	streamStart := protocol.StreamStart{
 		Player: &protocol.StreamStartPlayer{
 			Codec:      codec,
@@ -165,7 +156,6 @@ func (e *AudioEngine) AddClient(client *Client) {
 		log.Printf("Warning: Could not send stream/start to %s (channel full)", client.Name)
 	}
 
-	// Send metadata (use select to avoid blocking)
 	title, artist, album := e.source.Metadata()
 	metadata := protocol.StreamMetadata{
 		Title:  title,
@@ -185,12 +175,10 @@ func (e *AudioEngine) AddClient(client *Client) {
 	}
 }
 
-// RemoveClient removes a client from audio streaming
 func (e *AudioEngine) RemoveClient(client *Client) {
 	e.clientsMu.Lock()
 	defer e.clientsMu.Unlock()
 
-	// Clean up encoder and resampler if they exist (with lock held)
 	client.mu.Lock()
 	if client.OpusEncoder != nil {
 		client.OpusEncoder.Close()
@@ -205,10 +193,10 @@ func (e *AudioEngine) RemoveClient(client *Client) {
 	log.Printf("Audio engine: removed client %s", client.Name)
 }
 
-// negotiateCodec selects the best codec based on client capabilities
-// With resampling support, we can now prefer Opus for bandwidth efficiency
+// negotiateCodec selects the best codec based on client capabilities.
+// With resampling support, we prefer PCM for native-rate hi-res clients and
+// Opus (with resampling) for everything else to save bandwidth.
 func (e *AudioEngine) negotiateCodec(client *Client) string {
-	// If client has no capabilities, default to PCM
 	if client.Capabilities == nil {
 		return "pcm"
 	}
@@ -220,31 +208,24 @@ func (e *AudioEngine) negotiateCodec(client *Client) string {
 	// 2. If client supports Opus → use Opus with resampling (bandwidth efficient)
 	// 3. Otherwise → fall back to PCM
 
-	// Check if client supports PCM at our native sample rate (lossless hi-res)
 	for _, format := range client.Capabilities.SupportedFormats {
 		if format.Codec == "pcm" && format.SampleRate == sourceRate && format.BitDepth == DefaultBitDepth {
 			return "pcm"
 		}
 	}
 
-	// Check if client supports Opus or FLAC
 	for _, format := range client.Capabilities.SupportedFormats {
 		if format.Codec == "opus" {
 			return "opus"
 		}
 	}
 
-	// Default to PCM even if sample rate doesn't match perfectly
-	// Client will handle resampling on their end if needed
 	return "pcm"
 }
 
-// generateAndSendChunk generates a chunk of audio and sends it to all clients
 func (e *AudioEngine) generateAndSendChunk() {
-	// Get current timestamp (buffer ahead time calculated per-client based on codec)
 	currentTime := e.server.getClockMicros()
 
-	// Reuse pre-allocated sample buffer
 	samples := e.sampleBuf
 	n, err := e.source.Read(samples)
 	if err != nil {
@@ -252,10 +233,6 @@ func (e *AudioEngine) generateAndSendChunk() {
 		return
 	}
 
-	// Note: Chunk generation happens every 20ms (50/sec), logging disabled to avoid spam
-	// Debug info: server generates chunks of size=7680 samples (20ms @ 192kHz stereo)
-
-	// Send to all clients (encode per-client based on codec)
 	e.clientsMu.RLock()
 	defer e.clientsMu.RUnlock()
 
@@ -263,26 +240,20 @@ func (e *AudioEngine) generateAndSendChunk() {
 		var audioData []byte
 		var encodeErr error
 
-		// Read codec, encoder, and resampler atomically
 		client.mu.RLock()
 		codec := client.Codec
 		opusEncoder := client.OpusEncoder
 		resampler := client.Resampler
 		client.mu.RUnlock()
 
-		// Encode based on client's negotiated codec
 		switch codec {
 		case "opus":
 			if opusEncoder != nil {
 				samplesToEncode := samples[:n]
 
-				// Resample if needed (when source rate != 48kHz)
 				if resampler != nil {
-					// Calculate output buffer size
 					outputSamples := resampler.OutputSamplesNeeded(len(samplesToEncode))
 					resampled := make([]int32, outputSamples)
-
-					// Perform resampling
 					samplesWritten := resampler.Resample(samplesToEncode, resampled)
 					samplesToEncode = resampled[:samplesWritten]
 				}
@@ -306,14 +277,12 @@ func (e *AudioEngine) generateAndSendChunk() {
 			audioData = encodePCM(samples[:n])
 		}
 
-		// Calculate playback time based on codec (Opus needs more buffer for processing overhead)
 		bufferAhead := BufferAheadMs
 		if codec == "opus" {
 			bufferAhead = BufferAheadOpusMs
 		}
 		playbackTime := currentTime + (int64(bufferAhead) * 1000)
 
-		// Create binary message
 		chunk := CreateAudioChunk(playbackTime, audioData)
 
 		if err := e.server.sendBinary(client, chunk); err != nil {
@@ -322,22 +291,20 @@ func (e *AudioEngine) generateAndSendChunk() {
 	}
 }
 
-// convertToInt16 converts int32 samples to int16 (for Opus encoding)
+// convertToInt16 converts int32 samples to int16 by dropping the lowest byte
+// (24-bit → 16-bit range shift required by the Opus encoder).
 func convertToInt16(samples []int32) []int16 {
 	result := make([]int16, len(samples))
 	for i, s := range samples {
-		// Right-shift 8 bits to convert from 24-bit to 16-bit range
 		result[i] = int16(s >> 8)
 	}
 	return result
 }
 
-// encodePCM encodes int32 samples as 24-bit PCM bytes (little-endian, 3 bytes per sample)
+// encodePCM packs int32 samples as 24-bit little-endian PCM (3 bytes per sample).
 func encodePCM(samples []int32) []byte {
-	// 24-bit PCM: 3 bytes per sample
 	output := make([]byte, len(samples)*3)
 	for i, sample := range samples {
-		// Pack 24-bit value (little-endian)
 		output[i*3] = byte(sample)
 		output[i*3+1] = byte(sample >> 8)
 		output[i*3+2] = byte(sample >> 16)

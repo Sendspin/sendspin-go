@@ -14,13 +14,11 @@ import (
 )
 
 func main() {
-	// Parse command-line flags
 	serverAddr := flag.String("server", "localhost:8927", "Sendspin server address")
 	playerName := flag.String("name", "Basic Player", "Player name")
 	volume := flag.Int("volume", 80, "Initial volume (0-100)")
 	flag.Parse()
 
-	// Create player configuration
 	config := sendspin.PlayerConfig{
 		ServerAddr: *serverAddr,
 		PlayerName: *playerName,
@@ -42,14 +40,12 @@ func main() {
 		},
 	}
 
-	// Create player
 	player, err := sendspin.NewPlayer(config)
 	if err != nil {
 		log.Fatalf("Failed to create player: %v", err)
 	}
 	defer player.Close()
 
-	// Connect to server
 	log.Printf("Connecting to %s...", *serverAddr)
 	if err := player.Connect(); err != nil {
 		log.Fatalf("Failed to connect: %v", err)
@@ -57,12 +53,10 @@ func main() {
 
 	log.Printf("Connected! Starting playback...")
 
-	// Start playback
 	if err := player.Play(); err != nil {
 		log.Fatalf("Failed to start playback: %v", err)
 	}
 
-	// Print status periodically
 	go func() {
 		for {
 			status := player.Status()

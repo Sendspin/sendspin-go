@@ -12,7 +12,6 @@ import (
 	"github.com/charmbracelet/lipgloss"
 )
 
-// ServerTUI manages the server TUI
 type ServerTUI struct {
 	program  *tea.Program
 	updates  chan ServerStatus
@@ -21,7 +20,6 @@ type ServerTUI struct {
 	mu       sync.Mutex
 }
 
-// ServerStatus holds server state for TUI
 type ServerStatus struct {
 	Name       string
 	Port       int
@@ -30,7 +28,6 @@ type ServerStatus struct {
 	AudioTitle string
 }
 
-// ClientInfo holds client information for display
 type ClientInfo struct {
 	Name  string
 	ID    string
@@ -38,7 +35,6 @@ type ClientInfo struct {
 	State string
 }
 
-// tuiModel is the bubbletea model for server TUI
 type tuiModel struct {
 	status    ServerStatus
 	startTime time.Time
@@ -66,7 +62,6 @@ func (m tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case tea.KeyMsg:
 		if msg.String() == "q" || msg.String() == "ctrl+c" {
 			m.quitting = true
-			// Signal the server to stop
 			select {
 			case m.quitChan <- struct{}{}:
 			default:
@@ -90,7 +85,6 @@ func (m tuiModel) View() string {
 		return "Shutting down server...\n"
 	}
 
-	// Styles
 	titleStyle := lipgloss.NewStyle().
 		Bold(true).
 		Foreground(lipgloss.Color("205")).
@@ -107,14 +101,11 @@ func (m tuiModel) View() string {
 		Bold(true).
 		Foreground(lipgloss.Color("220"))
 
-	// Build the view
 	var b strings.Builder
 
-	// Title
 	b.WriteString(titleStyle.Render("Sendspin Server"))
 	b.WriteString("\n\n")
 
-	// Server info
 	b.WriteString(headerStyle.Render("Server: "))
 	b.WriteString(valueStyle.Render(m.status.Name))
 	b.WriteString("\n")
@@ -132,7 +123,6 @@ func (m tuiModel) View() string {
 	b.WriteString(valueStyle.Render(m.status.AudioTitle))
 	b.WriteString("\n\n")
 
-	// Connected clients
 	b.WriteString(clientHeaderStyle.Render(fmt.Sprintf("Connected Clients (%d)", len(m.status.Clients))))
 	b.WriteString("\n\n")
 
@@ -153,7 +143,6 @@ func (m tuiModel) View() string {
 	return b.String()
 }
 
-// NewServerTUI creates a new server TUI
 func NewServerTUI(serverName string, port int) *ServerTUI {
 	return &ServerTUI{
 		updates:  make(chan ServerStatus, 10),
@@ -161,7 +150,6 @@ func NewServerTUI(serverName string, port int) *ServerTUI {
 	}
 }
 
-// Start starts the TUI
 func (t *ServerTUI) Start(serverName string, port int) error {
 	m := tuiModel{
 		status: ServerStatus{
@@ -176,7 +164,6 @@ func (t *ServerTUI) Start(serverName string, port int) error {
 
 	t.program = tea.NewProgram(m, tea.WithAltScreen())
 
-	// Start listening for updates in a goroutine
 	go func() {
 		for status := range t.updates {
 			if t.program != nil {
@@ -189,7 +176,6 @@ func (t *ServerTUI) Start(serverName string, port int) error {
 	return err
 }
 
-// Update sends a status update to the TUI
 func (t *ServerTUI) Update(status ServerStatus) {
 	t.mu.Lock()
 	defer t.mu.Unlock()
@@ -199,11 +185,9 @@ func (t *ServerTUI) Update(status ServerStatus) {
 	select {
 	case t.updates <- status:
 	default:
-		// Don't block if channel is full
 	}
 }
 
-// Stop stops the TUI
 func (t *ServerTUI) Stop() {
 	t.mu.Lock()
 	t.stopped = true
@@ -215,7 +199,6 @@ func (t *ServerTUI) Stop() {
 	close(t.updates)
 }
 
-// QuitChan returns the channel that signals when user wants to quit
 func (t *ServerTUI) QuitChan() <-chan struct{} {
 	return t.quitChan
 }

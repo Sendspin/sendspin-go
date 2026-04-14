@@ -147,7 +147,6 @@ func (tf *TimeFilter) Update(measurement, maxError, timeAdded int64) {
 	tf.offsetDriftCovariance = newOffsetDriftCov - driftGain*newOffsetCov
 	tf.offsetCovariance = newOffsetCov - offsetGain*newOffsetCov
 
-	// Update drift significance flag
 	driftSq := tf.drift * tf.drift
 	tf.useDrift = driftSq > tf.driftSignificanceThresholdSq*tf.driftCovariance
 }

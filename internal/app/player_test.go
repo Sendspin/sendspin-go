@@ -49,7 +49,6 @@ func TestPlayerInitialization(t *testing.T) {
 
 	player := New(config)
 
-	// Verify components are initialized
 	if player.clockSync == nil {
 		t.Error("clockSync should be initialized")
 	}
@@ -78,7 +77,6 @@ func TestPlayerWithArtwork(t *testing.T) {
 
 	player := New(config)
 
-	// Artwork downloader should be initialized
 	if player.artwork == nil {
 		t.Error("artwork downloader should be initialized")
 	}
@@ -157,10 +155,8 @@ func TestMultiplePlayerInstances(t *testing.T) {
 		t.Error("expected different buffer sizes")
 	}
 
-	// Both should have independent contexts
 	player1.Stop()
 
-	// player1 context should be cancelled
 	select {
 	case <-player1.ctx.Done():
 		// Expected
@@ -168,7 +164,6 @@ func TestMultiplePlayerInstances(t *testing.T) {
 		t.Error("player1 context should be cancelled")
 	}
 
-	// player2 context should still be active
 	select {
 	case <-player2.ctx.Done():
 		t.Error("player2 context should still be active")
@@ -224,7 +219,6 @@ func TestPlayerOutputInitialization(t *testing.T) {
 		t.Fatal("output should be initialized")
 	}
 
-	// Volume and mute are tracked on Player, not on the output interface
 	if player.volume != 100 {
 		t.Errorf("expected default volume 100, got %d", player.volume)
 	}

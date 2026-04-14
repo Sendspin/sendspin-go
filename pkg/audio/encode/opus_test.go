@@ -64,7 +64,6 @@ func TestNewOpus(t *testing.T) {
 				if encoder == nil {
 					t.Errorf("NewOpus() returned nil encoder")
 				}
-				// Clean up
 				if encoder != nil {
 					encoder.Close()
 				}
@@ -87,11 +86,10 @@ func TestOpusEncoder_Encode(t *testing.T) {
 	}
 	defer encoder.Close()
 
-	// Create a frame of samples (20ms at 48kHz = 960 samples per channel)
+	// 20ms frame at 48kHz = 960 samples per channel
 	frameSize := 48000 / 50               // 20ms
 	samples := make([]int32, frameSize*2) // stereo
 
-	// Fill with a simple sine wave pattern
 	for i := 0; i < len(samples); i++ {
 		samples[i] = int32((i % 1000) * 8388) // Simple pattern
 	}
@@ -101,7 +99,6 @@ func TestOpusEncoder_Encode(t *testing.T) {
 		t.Fatalf("Encode() failed: %v", err)
 	}
 
-	// Opus packets should be non-empty and within max size
 	if len(output) == 0 {
 		t.Errorf("Encode() returned empty output")
 	}
@@ -124,7 +121,7 @@ func TestOpusEncoder_EncodeSilence(t *testing.T) {
 	}
 	defer encoder.Close()
 
-	// Create a frame of silence (20ms at 48kHz = 960 samples per channel)
+	// 20ms frame at 48kHz = 960 samples per channel
 	frameSize := 48000 / 50               // 20ms
 	samples := make([]int32, frameSize*2) // stereo, all zeros
 

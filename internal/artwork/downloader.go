@@ -15,14 +15,12 @@ import (
 	"time"
 )
 
-// Downloader manages artwork downloads
 type Downloader struct {
 	cacheDir    string
 	currentPath string
 	client      *http.Client
 }
 
-// NewDownloader creates a new artwork downloader
 func NewDownloader() (*Downloader, error) {
 	cacheDir := filepath.Join(os.TempDir(), "resonate-artwork")
 	if err := os.MkdirAll(cacheDir, 0755); err != nil {
@@ -35,7 +33,6 @@ func NewDownloader() (*Downloader, error) {
 	}, nil
 }
 
-// Download fetches artwork from URL and saves to cache
 func (d *Downloader) Download(url string) (string, error) {
 	if url == "" {
 		return "", nil
@@ -50,20 +47,17 @@ func (d *Downloader) Download(url string) (string, error) {
 		return "", fmt.Errorf("unsupported URL scheme %q: only http and https are allowed", parsed.Scheme)
 	}
 
-	// Create a cache key from URL hash
 	hash := sha256.Sum256([]byte(url))
 	ext := getExtension(url)
 	filename := fmt.Sprintf("%x%s", hash[:8], ext)
 	cachePath := filepath.Join(d.cacheDir, filename)
 
-	// Check if already cached
 	if _, err := os.Stat(cachePath); err == nil {
 		log.Printf("Artwork cache hit: %s", cachePath)
 		d.currentPath = cachePath
 		return cachePath, nil
 	}
 
-	// Download
 	log.Printf("Downloading artwork: %s", url)
 	resp, err := d.client.Get(url)
 	if err != nil {
@@ -75,7 +69,6 @@ func (d *Downloader) Download(url string) (string, error) {
 		return "", fmt.Errorf("artwork download failed: HTTP %d", resp.StatusCode)
 	}
 
-	// Save to file
 	f, err := os.Create(cachePath)
 	if err != nil {
 		return "", fmt.Errorf("failed to create cache file: %w", err)
@@ -95,17 +88,13 @@ func (d *Downloader) Download(url string) (string, error) {
 	return cachePath, nil
 }
 
-// CurrentPath returns the path to the current artwork
 func (d *Downloader) CurrentPath() string {
 	return d.currentPath
 }
 
-// getExtension extracts file extension from URL
 func getExtension(url string) string {
-	// Remove query string
 	url = strings.Split(url, "?")[0]
 
-	// Get extension
 	ext := filepath.Ext(url)
 	if ext == "" {
 		ext = ".jpg" // Default to JPEG
@@ -114,7 +103,6 @@ func getExtension(url string) string {
 	return ext
 }
 
-// Cleanup removes old cached artwork
 func (d *Downloader) Cleanup() error {
 	return os.RemoveAll(d.cacheDir)
 }

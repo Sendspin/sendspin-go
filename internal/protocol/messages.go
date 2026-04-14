@@ -5,13 +5,11 @@
 // All new code should import pkg/protocol which contains spec-aligned message types.
 package protocol
 
-// Message is the top-level wrapper for all protocol messages
 type Message struct {
 	Type    string      `json:"type"`
 	Payload interface{} `json:"payload"`
 }
 
-// ClientHello is sent by clients to initiate the handshake
 type ClientHello struct {
 	ClientID          string             `json:"client_id"`
 	Name              string             `json:"name"`
@@ -23,14 +21,12 @@ type ClientHello struct {
 	VisualizerSupport *VisualizerSupport `json:"visualizer_support,omitempty"`
 }
 
-// DeviceInfo contains device identification
 type DeviceInfo struct {
 	ProductName     string `json:"product_name"`
 	Manufacturer    string `json:"manufacturer"`
 	SoftwareVersion string `json:"software_version"`
 }
 
-// PlayerSupport describes player capabilities
 type PlayerSupport struct {
 	// Spec fields (newer)
 	SupportFormats    []AudioFormat `json:"support_formats,omitempty"`
@@ -44,7 +40,6 @@ type PlayerSupport struct {
 	SupportBitDepth    []int    `json:"support_bit_depth,omitempty"`
 }
 
-// AudioFormat describes a supported audio format
 type AudioFormat struct {
 	Codec      string `json:"codec"`
 	Channels   int    `json:"channels"`
@@ -52,20 +47,17 @@ type AudioFormat struct {
 	BitDepth   int    `json:"bit_depth"`
 }
 
-// MetadataSupport describes metadata/artwork capabilities
 type MetadataSupport struct {
 	SupportPictureFormats []string `json:"support_picture_formats"`
 	MediaWidth            int      `json:"media_width,omitempty"`
 	MediaHeight           int      `json:"media_height,omitempty"`
 }
 
-// VisualizerSupport describes visualization capabilities
 type VisualizerSupport struct {
 	BufferCapacity int `json:"buffer_capacity,omitempty"`
 	// FFT details - to be determined by spec
 }
 
-// ServerHello is the server's response to client/hello
 type ServerHello struct {
 	ServerID         string   `json:"server_id"`
 	Name             string   `json:"name"`
@@ -81,14 +73,12 @@ type ClientState struct {
 	Muted  bool   `json:"muted"`  // All fields are required
 }
 
-// ServerCommand is a control message from the server
 type ServerCommand struct {
 	Command string `json:"command"`
 	Volume  int    `json:"volume,omitempty"`
 	Mute    bool   `json:"mute,omitempty"`
 }
 
-// StreamStartPlayer contains the audio format details
 type StreamStartPlayer struct {
 	Codec       string `json:"codec"`
 	SampleRate  int    `json:"sample_rate"`
@@ -97,12 +87,10 @@ type StreamStartPlayer struct {
 	CodecHeader string `json:"codec_header,omitempty"` // Base64-encoded
 }
 
-// StreamStart notifies the client of stream format (nested structure)
 type StreamStart struct {
 	Player *StreamStartPlayer `json:"player,omitempty"`
 }
 
-// StreamMetadata contains track information
 type StreamMetadata struct {
 	Title      string `json:"title,omitempty"`
 	Artist     string `json:"artist,omitempty"`
@@ -110,7 +98,6 @@ type StreamMetadata struct {
 	ArtworkURL string `json:"artwork_url,omitempty"`
 }
 
-// SessionMetadata contains track metadata within session updates
 type SessionMetadata struct {
 	Title         string  `json:"title,omitempty"`
 	Artist        string  `json:"artist,omitempty"`
@@ -126,19 +113,16 @@ type SessionMetadata struct {
 	Timestamp     int64   `json:"timestamp,omitempty"`
 }
 
-// SessionUpdate notifies client of session state changes
 type SessionUpdate struct {
 	GroupID       string           `json:"group_id"`
 	PlaybackState string           `json:"playback_state,omitempty"` // "playing" or "idle"
 	Metadata      *SessionMetadata `json:"metadata,omitempty"`
 }
 
-// ClientTime is sent for clock synchronization
 type ClientTime struct {
 	ClientTransmitted int64 `json:"client_transmitted"` // Client timestamp in microseconds
 }
 
-// ServerTime is the response to client/time
 type ServerTime struct {
 	ClientTransmitted int64 `json:"client_transmitted"` // Echoed client timestamp
 	ServerReceived    int64 `json:"server_received"`    // Server receive timestamp

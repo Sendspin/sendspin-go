@@ -100,7 +100,6 @@ type Client struct {
 	mu sync.RWMutex
 }
 
-// New creates a new server instance
 func New(config Config) *Server {
 	mux := http.NewServeMux()
 
@@ -134,13 +133,10 @@ func New(config Config) *Server {
 	}
 }
 
-// Start starts the server
 func (s *Server) Start() error {
-	// Start TUI if enabled
 	if s.config.UseTUI {
 		s.tui = NewServerTUI(s.config.Name, s.config.Port)
 
-		// Start TUI in a goroutine
 		s.wg.Add(1)
 		go func() {
 			defer s.wg.Done()
@@ -153,14 +149,12 @@ func (s *Server) Start() error {
 
 	log.Printf("Server starting: %s (ID: %s)", s.config.Name, s.serverID)
 
-	// Create audio engine
 	audioEngine, err := NewAudioEngine(s)
 	if err != nil {
 		return fmt.Errorf("failed to create audio engine: %w", err)
 	}
 	s.audioEngine = audioEngine
 
-	// Start mDNS advertisement if enabled
 	if s.config.EnableMDNS {
 		s.mdnsManager = discovery.NewManager(discovery.Config{
 			ServiceName: s.config.Name,
@@ -175,17 +169,14 @@ func (s *Server) Start() error {
 		}
 	}
 
-	// Set up HTTP handlers
 	s.mux.HandleFunc("/sendspin", s.handleWebSocket)
 
-	// Start audio streaming
 	s.wg.Add(1)
 	go func() {
 		defer s.wg.Done()
 		s.audioEngine.Start()
 	}()
 
-	// Start HTTP server
 	addr := fmt.Sprintf(":%d", s.config.Port)
 	log.Printf("WebSocket server listening on %s", addr)
 
@@ -194,7 +185,6 @@ func (s *Server) Start() error {
 		Handler: s.mux,
 	}
 
-	// Run server in goroutine
 	errChan := make(chan error, 1)
 	go func() {
 		if err := s.httpServer.ListenAndServe(); err != http.ErrServerClosed {
@@ -202,7 +192,6 @@ func (s *Server) Start() error {
 		}
 	}()
 
-	// Wait for stop signal, TUI quit, or server error
 	var serverErr error
 	var tuiQuitChan <-chan struct{}
 	if s.tui != nil {
@@ -220,25 +209,20 @@ func (s *Server) Start() error {
 		// Fall through to cleanup
 	}
 
-	// Mark server as shutting down to reject new connections
 	s.shutdownMu.Lock()
 	s.isShutdown = true
 	s.shutdownMu.Unlock()
 
-	// Stop TUI first so it can display shutdown message
 	if s.tui != nil {
 		s.tui.Stop()
 	}
 
-	// Stop audio engine
 	s.audioEngine.Stop()
 
-	// Stop mDNS
 	if s.mdnsManager != nil {
 		s.mdnsManager.Stop()
 	}
 
-	// Graceful shutdown with timeout
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 
@@ -249,21 +233,18 @@ func (s *Server) Start() error {
 	s.wg.Wait()
 	log.Printf("Server stopped cleanly")
 
-	// Return server error if one occurred
 	if serverErr != nil {
 		return fmt.Errorf("HTTP server failed: %w", serverErr)
 	}
 	return nil
 }
 
-// Stop stops the server
 func (s *Server) Stop() {
 	s.stopOnce.Do(func() {
 		close(s.stopChan)
 	})
 }
 
-// handleWebSocket handles WebSocket connections
 func (s *Server) handleWebSocket(w http.ResponseWriter, r *http.Request) {
 	conn, err := s.upgrader.Upgrade(w, r, nil)
 	if err != nil {
@@ -273,16 +254,13 @@ func (s *Server) handleWebSocket(w http.ResponseWriter, r *http.Request) {
 
 	log.Printf("New WebSocket connection from %s", r.RemoteAddr)
 
-	// Handle the connection
 	s.handleConnection(conn)
 }
 
-// handleConnection manages a client connection
 func (s *Server) handleConnection(conn *websocket.Conn) {
 	defer conn.Close()
 	conn.SetReadLimit(1 << 20) // 1MB
 
-	// Check if server is shutting down
 	s.shutdownMu.RLock()
 	if s.isShutdown {
 		s.shutdownMu.RUnlock()
@@ -295,7 +273,6 @@ func (s *Server) handleConnection(conn *websocket.Conn) {
 		log.Printf("[DEBUG] New connection, waiting for handshake")
 	}
 
-	// Wait for client/hello
 	_, data, err := conn.ReadMessage()
 	if err != nil {
 		log.Printf("Error reading hello: %v", err)
@@ -313,7 +290,6 @@ func (s *Server) handleConnection(conn *websocket.Conn) {
 		return
 	}
 
-	// Parse client hello
 	helloData, err := json.Marshal(msg.Payload)
 	if err != nil {
 		log.Printf("Error marshaling hello payload: %v", err)
@@ -326,7 +302,6 @@ func (s *Server) handleConnection(conn *websocket.Conn) {
 		return
 	}
 
-	// Validate client hello
 	if hello.ClientID == "" {
 		log.Printf("Client hello missing ClientID")
 		return
@@ -342,7 +317,6 @@ func (s *Server) handleConnection(conn *websocket.Conn) {
 
 	log.Printf("Client hello: %s (ID: %s, Roles: %v)", hello.Name, hello.ClientID, hello.SupportedRoles)
 
-	// Create client before acquiring lock
 	client := &Client{
 		ID:           hello.ClientID,
 		Name:         hello.Name,
@@ -356,7 +330,6 @@ func (s *Server) handleConnection(conn *websocket.Conn) {
 		done:         make(chan struct{}),
 	}
 
-	// Check for duplicate client ID and register atomically
 	s.clientsMu.Lock()
 	if existingClient, exists := s.clients[hello.ClientID]; exists {
 		s.clientsMu.Unlock()
@@ -376,11 +349,9 @@ func (s *Server) handleConnection(conn *websocket.Conn) {
 		return
 	}
 
-	// Register client
 	s.clients[client.ID] = client
 	s.clientsMu.Unlock()
 
-	// Update TUI with new client
 	s.updateTUI()
 
 	defer func() {
@@ -390,11 +361,9 @@ func (s *Server) handleConnection(conn *websocket.Conn) {
 		close(client.done)
 		log.Printf("Client disconnected: %s", client.Name)
 
-		// Update TUI after client disconnect
 		s.updateTUI()
 	}()
 
-	// Send server/hello
 	serverHello := protocol.ServerHello{
 		ServerID:         s.serverID,
 		Name:             s.config.Name,
@@ -408,20 +377,17 @@ func (s *Server) handleConnection(conn *websocket.Conn) {
 		return
 	}
 
-	// Start writer goroutine
 	s.wg.Add(1)
 	go func() {
 		defer s.wg.Done()
 		s.clientWriter(client)
 	}()
 
-	// Start stream for this client if it's a player
 	if s.hasRole(client, "player") {
 		s.audioEngine.AddClient(client)
 		defer s.audioEngine.RemoveClient(client)
 	}
 
-	// Read messages from client
 	for {
 		_, data, err := conn.ReadMessage()
 		if err != nil {
@@ -435,7 +401,6 @@ func (s *Server) handleConnection(conn *websocket.Conn) {
 	}
 }
 
-// clientWriter sends messages to the client
 func (s *Server) clientWriter(client *Client) {
 	ticker := time.NewTicker(30 * time.Second)
 	defer ticker.Stop()
@@ -445,7 +410,6 @@ func (s *Server) clientWriter(client *Client) {
 	for {
 		select {
 		case msg := <-client.sendChan:
-			// Determine message type
 			switch v := msg.(type) {
 			case []byte:
 				client.Conn.SetWriteDeadline(time.Now().Add(writeDeadline))
@@ -477,7 +441,6 @@ func (s *Server) clientWriter(client *Client) {
 	}
 }
 
-// handleClientMessage processes messages from clients
 func (s *Server) handleClientMessage(client *Client, data []byte) {
 	var msg protocol.Message
 	if err := json.Unmarshal(data, &msg); err != nil {
@@ -497,12 +460,10 @@ func (s *Server) handleClientMessage(client *Client, data []byte) {
 	}
 }
 
-// handleTimeSync responds to time synchronization requests
 func (s *Server) handleTimeSync(client *Client, payload interface{}) {
 	// Capture receive time as early as possible
 	serverRecv := s.getClockMicros()
 
-	// Parse client time
 	timeData, err := json.Marshal(payload)
 	if err != nil {
 		log.Printf("Error marshaling time payload: %v", err)
@@ -515,8 +476,7 @@ func (s *Server) handleTimeSync(client *Client, payload interface{}) {
 		return
 	}
 
-	// Capture transmit time before queueing message
-	// Note: This timestamp represents the queue time, not the actual wire time.
+	// Note: This timestamp is the queue time, not the actual wire time.
 	// The message is queued to sendChan and transmitted asynchronously by clientWriter.
 	// For more accurate timing, the timestamp would need to be captured immediately
 	// before the actual WebSocket write operation.
@@ -538,8 +498,7 @@ func (s *Server) handleTimeSync(client *Client, payload interface{}) {
 	}
 }
 
-// handleClientState handles state updates from clients.
-// Supports both legacy "player/update" payloads and spec-style "client/state" payloads.
+// handleClientState accepts both legacy "player/update" and spec-style "client/state" payloads.
 func (s *Server) handleClientState(client *Client, payload interface{}) {
 	stateData, err := json.Marshal(payload)
 	if err != nil {
@@ -547,7 +506,6 @@ func (s *Server) handleClientState(client *Client, payload interface{}) {
 		return
 	}
 
-	// Spec-style wrapper: { "player": { ... } }
 	var wrapped struct {
 		Player *protocol.ClientState `json:"player,omitempty"`
 	}
@@ -556,7 +514,6 @@ func (s *Server) handleClientState(client *Client, payload interface{}) {
 		return
 	}
 
-	// Legacy payload: { "state": "...", "volume": ..., "muted": ... }
 	var state protocol.ClientState
 	if err := json.Unmarshal(stateData, &state); err == nil {
 		s.applyClientState(client, state)
@@ -576,7 +533,6 @@ func (s *Server) applyClientState(client *Client, state protocol.ClientState) {
 	log.Printf("Client %s state: %s (vol: %d, muted: %v)", client.Name, state.State, state.Volume, state.Muted)
 }
 
-// sendMessage sends a JSON message to a client
 func (s *Server) sendMessage(client *Client, msgType string, payload interface{}) error {
 	msg := protocol.Message{
 		Type:    msgType,
@@ -591,7 +547,6 @@ func (s *Server) sendMessage(client *Client, msgType string, payload interface{}
 	}
 }
 
-// sendBinary sends binary data to a client
 func (s *Server) sendBinary(client *Client, data []byte) error {
 	select {
 	case client.sendChan <- data:
@@ -601,12 +556,11 @@ func (s *Server) sendBinary(client *Client, data []byte) error {
 	}
 }
 
-// getClockMicros returns the server clock in microseconds
 func (s *Server) getClockMicros() int64 {
 	return time.Since(s.clockStart).Microseconds()
 }
 
-// hasRole checks if a client has a specific role (handles versioned roles)
+// hasRole checks if a client has a role, accepting both bare ("player") and versioned ("player@1") forms.
 func (s *Server) hasRole(client *Client, role string) bool {
 	for _, r := range client.Roles {
 		if r == role || strings.HasPrefix(r, role+"@") {
@@ -616,9 +570,7 @@ func (s *Server) hasRole(client *Client, role string) bool {
 	return false
 }
 
-// activateRoles returns the active roles based on client's supported roles.
-// Only activates roles that this server actually implements.
-// Preserves input order (first occurrence of each role family).
+// activateRoles filters to roles this server implements, preserving input order.
 func (s *Server) activateRoles(supportedRoles []string) []string {
 	seen := make(map[string]bool)
 	result := make([]string, 0, len(supportedRoles))
@@ -643,9 +595,8 @@ func (s *Server) activateRoles(supportedRoles []string) []string {
 	return result
 }
 
-// CreateAudioChunk creates a binary audio chunk message
+// CreateAudioChunk encodes a binary audio frame: [type:1][timestamp:8][data:N].
 func CreateAudioChunk(timestamp int64, audioData []byte) []byte {
-	// Binary format: [message_type:1][timestamp:8][audio_data:N]
 	chunk := make([]byte, 1+8+len(audioData))
 	chunk[0] = AudioChunkMessageType
 	binary.BigEndian.PutUint64(chunk[1:9], uint64(timestamp))

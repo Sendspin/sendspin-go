@@ -15,7 +15,6 @@ import (
 	"github.com/google/uuid"
 )
 
-// ReceiverConfig configures a Receiver
 type ReceiverConfig struct {
 	ServerAddr     string
 	PlayerName     string
@@ -28,7 +27,6 @@ type ReceiverConfig struct {
 	OnError        func(error)
 }
 
-// ReceiverStats contains receiver pipeline statistics
 type ReceiverStats struct {
 	Received    int64
 	Played      int64
@@ -63,7 +61,6 @@ func NewReceiver(config ReceiverConfig) (*Receiver, error) {
 		return nil, fmt.Errorf("ReceiverConfig.ServerAddr is required")
 	}
 
-	// Set defaults
 	if config.BufferMs == 0 {
 		config.BufferMs = 500
 	}
@@ -409,7 +406,6 @@ func (r *Receiver) performInitialSync() error {
 	return nil
 }
 
-// clockSyncLoop continuously syncs the clock with the server.
 func (r *Receiver) clockSyncLoop() {
 	ticker := time.NewTicker(1 * time.Second)
 	defer ticker.Stop()
@@ -440,7 +436,6 @@ func (r *Receiver) clockSyncLoop() {
 	}
 }
 
-// notifyError calls the OnError callback if set, otherwise logs the error.
 func (r *Receiver) notifyError(err error) {
 	if r.config.OnError != nil {
 		r.config.OnError(err)
@@ -449,7 +444,6 @@ func (r *Receiver) notifyError(err error) {
 	}
 }
 
-// Close shuts down the Receiver, releasing all resources.
 func (r *Receiver) Close() error {
 	r.cancel()
 

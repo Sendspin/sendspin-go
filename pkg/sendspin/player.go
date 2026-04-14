@@ -19,7 +19,6 @@ type PlayerConfig struct {
 	// ServerAddr is the server address (host:port)
 	ServerAddr string
 
-	// PlayerName is the display name for this player
 	PlayerName string
 
 	// Volume is the initial volume (0-100)
@@ -28,16 +27,12 @@ type PlayerConfig struct {
 	// BufferMs is the playback buffer size in milliseconds (default: 500)
 	BufferMs int
 
-	// DeviceInfo provides device identification
 	DeviceInfo DeviceInfo
 
-	// OnMetadata is called when metadata is received
 	OnMetadata func(Metadata)
 
-	// OnStateChange is called when playback state changes
 	OnStateChange func(PlayerState)
 
-	// OnError is called when errors occur
 	OnError func(error)
 
 	// Output overrides the default audio output backend.
@@ -53,14 +48,12 @@ type PlayerConfig struct {
 	ProcessCallback func([]int32)
 }
 
-// DeviceInfo describes the player device
 type DeviceInfo struct {
 	ProductName     string
 	Manufacturer    string
 	SoftwareVersion string
 }
 
-// Metadata contains track information
 type Metadata struct {
 	Title       string
 	Artist      string
@@ -72,7 +65,6 @@ type Metadata struct {
 	Duration    int // seconds
 }
 
-// PlayerState describes the current state
 type PlayerState struct {
 	State      string // "idle", "playing", "paused"
 	Volume     int
@@ -84,7 +76,6 @@ type PlayerState struct {
 	Connected  bool
 }
 
-// PlayerStats contains playback statistics
 type PlayerStats struct {
 	Received    int64
 	Played      int64
@@ -105,7 +96,6 @@ type Player struct {
 	cancel   context.CancelFunc
 }
 
-// NewPlayer creates a new player with the given configuration
 func NewPlayer(config PlayerConfig) (*Player, error) {
 	if config.Volume == 0 {
 		config.Volume = 100
@@ -130,7 +120,6 @@ func NewPlayer(config PlayerConfig) (*Player, error) {
 	}, nil
 }
 
-// Connect establishes connection to the server and starts playback
 func (p *Player) Connect() error {
 	recv, err := NewReceiver(ReceiverConfig{
 		ServerAddr:     p.config.ServerAddr,
@@ -214,7 +203,6 @@ func (p *Player) consumeAudio() {
 	}
 }
 
-// Play starts or resumes playback
 func (p *Player) Play() error {
 	if !p.state.Connected {
 		return fmt.Errorf("not connected")
@@ -224,7 +212,6 @@ func (p *Player) Play() error {
 	return p.sendState()
 }
 
-// Pause pauses playback
 func (p *Player) Pause() error {
 	if !p.state.Connected {
 		return fmt.Errorf("not connected")
@@ -234,7 +221,6 @@ func (p *Player) Pause() error {
 	return p.sendState()
 }
 
-// Stop stops playback
 func (p *Player) Stop() error {
 	if !p.state.Connected {
 		return fmt.Errorf("not connected")
@@ -266,7 +252,6 @@ func (p *Player) SetVolume(volume int) error {
 	return nil
 }
 
-// Mute sets the mute state
 func (p *Player) Mute(muted bool) error {
 	p.state.Muted = muted
 
@@ -282,12 +267,10 @@ func (p *Player) Mute(muted bool) error {
 	return nil
 }
 
-// Status returns the current player state
 func (p *Player) Status() PlayerState {
 	return p.state
 }
 
-// Stats returns playback statistics
 func (p *Player) Stats() PlayerStats {
 	stats := PlayerStats{}
 
@@ -304,7 +287,6 @@ func (p *Player) Stats() PlayerStats {
 	return stats
 }
 
-// Close closes the player and releases all resources
 func (p *Player) Close() error {
 	p.cancel()
 
@@ -350,7 +332,6 @@ func (p *Player) notifyError(err error) {
 
 // Helper functions used by both player.go and receiver.go
 
-// derefString safely dereferences a string pointer
 func derefString(s *string) string {
 	if s == nil {
 		return ""
@@ -358,7 +339,6 @@ func derefString(s *string) string {
 	return *s
 }
 
-// derefInt safely dereferences an int pointer
 func derefInt(i *int) int {
 	if i == nil {
 		return 0
@@ -366,7 +346,6 @@ func derefInt(i *int) int {
 	return *i
 }
 
-// getDurationSeconds extracts duration in seconds from progress
 func getDurationSeconds(p *protocol.ProgressState) int {
 	if p == nil {
 		return 0
@@ -374,7 +353,6 @@ func getDurationSeconds(p *protocol.ProgressState) int {
 	return p.TrackDuration / 1000
 }
 
-// containsRole checks if a role is in the list
 func containsRole(roles []string, role string) bool {
 	for _, r := range roles {
 		if r == role {

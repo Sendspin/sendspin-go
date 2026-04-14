@@ -32,7 +32,6 @@ func main() {
 
 	useTUI := !*noTUI
 
-	// Set up logging
 	f, err := os.OpenFile(*logFile, os.O_WRONLY|os.O_CREATE|os.O_APPEND, 0600)
 	if err != nil {
 		log.Fatalf("error opening log file: %v", err)
@@ -40,12 +39,12 @@ func main() {
 	defer f.Close()
 
 	if useTUI {
+		// Log to file only when TUI is running; otherwise the log would stomp the TUI
 		log.SetOutput(f)
 	} else {
 		log.SetOutput(io.MultiWriter(os.Stdout, f))
 	}
 
-	// Determine server name
 	serverName := *name
 	if serverName == "" {
 		hostname, err := os.Hostname()
@@ -59,7 +58,6 @@ func main() {
 		log.Printf("Starting Sendspin Server: %s on port %d", serverName, *port)
 	}
 
-	// Create audio source
 	var source sendspin.AudioSource
 	if *audioFile == "" {
 		source = sendspin.NewTestTone(sendspin.DefaultSampleRate, sendspin.DefaultChannels)
@@ -83,7 +81,6 @@ func main() {
 		log.Fatalf("Failed to create server: %v", err)
 	}
 
-	// Set up TUI if enabled
 	var tui *server.ServerTUI
 	var tuiDone chan struct{}
 	if useTUI {
@@ -114,7 +111,6 @@ func main() {
 		}()
 	}
 
-	// Handle shutdown
 	sigChan := make(chan os.Signal, 1)
 	signal.Notify(sigChan, syscall.SIGINT, syscall.SIGTERM)
 
@@ -128,7 +124,6 @@ func main() {
 		serverDone <- srv.Start()
 	}()
 
-	// Wait for shutdown signal, TUI quit, or server error
 	serverStopped := false
 	select {
 	case sig := <-sigChan:
@@ -158,7 +153,6 @@ func main() {
 	log.Printf("Server stopped")
 }
 
-// updateTUI sends current server state to the TUI
 func updateTUI(tui *server.ServerTUI, srv *sendspin.Server, source sendspin.AudioSource, serverName string, port int) {
 	clients := srv.Clients()
 

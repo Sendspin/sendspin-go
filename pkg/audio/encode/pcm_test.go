@@ -95,7 +95,6 @@ func TestPCMEncoder_Encode16Bit(t *testing.T) {
 	}
 	defer encoder.Close()
 
-	// Test data: a few sample values
 	samples := []int32{
 		0,         // silence
 		0x7FFF00,  // max positive 16-bit (left-justified in 24-bit)
@@ -109,13 +108,11 @@ func TestPCMEncoder_Encode16Bit(t *testing.T) {
 		t.Fatalf("Encode() failed: %v", err)
 	}
 
-	// Check output size: 2 bytes per sample for 16-bit
 	expectedSize := len(samples) * 2
 	if len(output) != expectedSize {
 		t.Errorf("Encode() output size = %d, want %d", len(output), expectedSize)
 	}
 
-	// Verify each sample
 	for i, sample := range samples {
 		expected := audio.SampleToInt16(sample)
 		actual := int16(binary.LittleEndian.Uint16(output[i*2:]))
@@ -139,7 +136,6 @@ func TestPCMEncoder_Encode24Bit(t *testing.T) {
 	}
 	defer encoder.Close()
 
-	// Test data: a few sample values
 	samples := []int32{
 		0,         // silence
 		0x7FFFFF,  // max positive 24-bit
@@ -153,13 +149,11 @@ func TestPCMEncoder_Encode24Bit(t *testing.T) {
 		t.Fatalf("Encode() failed: %v", err)
 	}
 
-	// Check output size: 3 bytes per sample for 24-bit
 	expectedSize := len(samples) * 3
 	if len(output) != expectedSize {
 		t.Errorf("Encode() output size = %d, want %d", len(output), expectedSize)
 	}
 
-	// Verify each sample
 	for i, sample := range samples {
 		expected := audio.SampleTo24Bit(sample)
 		actual := [3]byte{
@@ -192,7 +186,6 @@ func TestPCMEncoder_Close(t *testing.T) {
 	}
 }
 
-// Helper function to check if a string contains a substring
 func contains(s, substr string) bool {
 	return len(s) >= len(substr) && (s == substr || len(substr) == 0 ||
 		(len(s) > 0 && len(substr) > 0 && indexOf(s, substr) >= 0))

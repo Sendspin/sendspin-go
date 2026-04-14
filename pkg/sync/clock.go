@@ -18,7 +18,6 @@ type ClockSync struct {
 	sampleCount int
 }
 
-// Quality represents sync quality
 type Quality int
 
 const (
@@ -27,7 +26,6 @@ const (
 	QualityLost
 )
 
-// NewClockSync creates a new clock synchronizer
 func NewClockSync() *ClockSync {
 	return &ClockSync{
 		filter:  NewTimeFilter(DefaultTimeFilterConfig()),
@@ -59,7 +57,6 @@ func (cs *ClockSync) ProcessSyncResponse(t1, t2, t3, t4 int64) {
 
 	cs.filter.Update(measurement, maxError, t4)
 
-	// Update quality based on RTT
 	if rtt < 50000 {
 		cs.quality = QualityGood
 	} else {
@@ -75,7 +72,6 @@ func (cs *ClockSync) ProcessSyncResponse(t1, t2, t3, t4 int64) {
 	}
 }
 
-// GetStats returns sync statistics
 func (cs *ClockSync) GetStats() (rtt int64, quality Quality) {
 	cs.mu.RLock()
 	defer cs.mu.RUnlock()
