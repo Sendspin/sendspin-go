@@ -94,10 +94,9 @@ type Player struct {
    - Calls `config.ProcessCallback(buf.Samples)` if set.
    - Calls `output.Write(buf.Samples)`.
 
-Output auto-selection (when `PlayerConfig.Output` is nil) uses the format from the `OnStreamStart` callback:
+Output auto-selection (when `PlayerConfig.Output` is nil) creates a malgo backend to handle all bit depths:
 
-- `bitDepth <= 16` -> `output.NewOto()`
-- `bitDepth > 16` -> `output.NewMalgo()`
+- All formats -> `output.NewMalgo()` (supports 16/24/32-bit natively)
 
 `Player` retains: output lifecycle, volume/mute control, `ProcessCallback`, state change notifications.
 
