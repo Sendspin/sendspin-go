@@ -167,7 +167,7 @@ func (m *Manager) browseLoop() {
 		params := &mdns.QueryParam{
 			Service: "_sendspin-server._tcp",
 			Domain:  "local",
-			Timeout: 3,
+			Timeout: 3 * time.Second,
 			Entries: entries,
 			Logger:  silentLogger,
 		}
