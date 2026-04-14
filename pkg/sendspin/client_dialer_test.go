@@ -5,6 +5,7 @@ package sendspin
 
 import (
 	"context"
+	"errors"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -104,4 +105,61 @@ func TestClientDialerDedupesByInstance(t *testing.T) {
 	if len(seen) != 2 {
 		t.Fatalf("seen = %v, want 2 entries", seen)
 	}
+}
+
+func waitForCalls(t *testing.T, counter *int32, want int32, timeout time.Duration) {
+	t.Helper()
+	deadline := time.Now().Add(timeout)
+	for time.Now().Before(deadline) {
+		if atomic.LoadInt32(counter) >= want {
+			return
+		}
+		time.Sleep(2 * time.Millisecond)
+	}
+	t.Fatalf("timed out waiting for %d calls, got %d", want, atomic.LoadInt32(counter))
+}
+
+func TestClientDialerBackoffOnFailure(t *testing.T) {
+	in := make(chan *discovery.ClientInfo, 10)
+
+	var dialCalls int32
+	dial := func(ctx context.Context, info *discovery.ClientInfo) error {
+		atomic.AddInt32(&dialCalls, 1)
+		return errors.New("boom")
+	}
+
+	d := newClientDialer(in, dial)
+	// Override backoff clock to keep the test fast
+	d.baseBackoff = 20 * time.Millisecond
+	d.maxBackoff = 80 * time.Millisecond
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	done := make(chan struct{})
+	go func() {
+		d.run(ctx)
+		close(done)
+	}()
+
+	info := &discovery.ClientInfo{Instance: "a._sendspin._tcp.local.", Host: "1.1.1.1", Port: 8928, Path: "/sendspin"}
+
+	// First event — should dial immediately
+	in <- info
+	waitForCalls(t, &dialCalls, 1, 200*time.Millisecond)
+
+	// Immediately re-emit — should be rejected by backoff
+	in <- info
+	time.Sleep(5 * time.Millisecond)
+	if got := atomic.LoadInt32(&dialCalls); got != 1 {
+		t.Errorf("dialCalls after immediate retry = %d, want 1 (blocked by backoff)", got)
+	}
+
+	// Wait past base backoff, re-emit — should dial again
+	time.Sleep(30 * time.Millisecond)
+	in <- info
+	waitForCalls(t, &dialCalls, 2, 200*time.Millisecond)
+
+	cancel()
+	<-done
 }

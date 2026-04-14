@@ -9,6 +9,7 @@ import (
 	"log"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/Sendspin/sendspin-go/internal/discovery"
 )
@@ -36,17 +37,26 @@ type clientDialer struct {
 	in   <-chan *discovery.ClientInfo
 	dial dialFunc
 
-	mu     sync.Mutex
-	active map[string]bool // instance name -> currently dialing/connected
+	baseBackoff time.Duration
+	maxBackoff  time.Duration
+
+	mu       sync.Mutex
+	active   map[string]bool      // currently dialing/connected
+	cooldown map[string]time.Time // instance -> earliest retry time
+	failures map[string]int       // consecutive failure count per instance
 }
 
 // newClientDialer constructs a clientDialer that reads discovery events
 // from in and dispatches them through dial.
 func newClientDialer(in <-chan *discovery.ClientInfo, dial dialFunc) *clientDialer {
 	return &clientDialer{
-		in:     in,
-		dial:   dial,
-		active: make(map[string]bool),
+		in:          in,
+		dial:        dial,
+		baseBackoff: 1 * time.Second,
+		maxBackoff:  30 * time.Second,
+		active:      make(map[string]bool),
+		cooldown:    make(map[string]time.Time),
+		failures:    make(map[string]int),
 	}
 }
 
@@ -73,8 +83,9 @@ func (d *clientDialer) run(ctx context.Context) {
 			wg.Add(1)
 			go func(info *discovery.ClientInfo) {
 				defer wg.Done()
-				defer d.release(info.Instance)
-				if err := d.dial(ctx, info); err != nil {
+				err := d.dial(ctx, info)
+				d.release(info.Instance, err)
+				if err != nil {
 					log.Printf("dial client %s: %v", info.Instance, err)
 				}
 			}(info)
@@ -82,22 +93,39 @@ func (d *clientDialer) run(ctx context.Context) {
 	}
 }
 
-// claim returns true if the instance slot was free and is now owned by
-// the caller. Returns false if another goroutine already owns it.
+// claim returns true if the instance slot was free, not in cooldown,
+// and is now owned by the caller. Returns false otherwise.
 func (d *clientDialer) claim(instance string) bool {
 	d.mu.Lock()
 	defer d.mu.Unlock()
 	if d.active[instance] {
 		return false
 	}
+	if until, ok := d.cooldown[instance]; ok && time.Now().Before(until) {
+		return false
+	}
 	d.active[instance] = true
 	return true
 }
 
-// release frees the instance slot so future discovery events can
-// re-dial it.
-func (d *clientDialer) release(instance string) {
+// release frees the instance slot. On success (dialErr == nil) it clears
+// any prior failure state; on error it records a consecutive failure and
+// schedules an exponentially-backed-off cooldown before the next retry.
+func (d *clientDialer) release(instance string, dialErr error) {
 	d.mu.Lock()
 	defer d.mu.Unlock()
 	delete(d.active, instance)
+
+	if dialErr == nil {
+		delete(d.failures, instance)
+		delete(d.cooldown, instance)
+		return
+	}
+
+	d.failures[instance]++
+	backoff := d.baseBackoff * time.Duration(1<<(d.failures[instance]-1))
+	if backoff > d.maxBackoff || backoff <= 0 {
+		backoff = d.maxBackoff
+	}
+	d.cooldown[instance] = time.Now().Add(backoff)
 }
