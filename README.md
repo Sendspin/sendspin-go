@@ -148,6 +148,21 @@ sudo apt-get install pkg-config libopus-dev libopusfile-dev ffmpeg
 sudo dnf install pkg-config opus-devel opusfile-devel ffmpeg
 ```
 
+**Windows (MSYS2):**
+
+Install MSYS2 from https://www.msys2.org/, then in a **MSYS2 MinGW 64-bit** shell:
+
+```bash
+pacman -S mingw-w64-x86_64-gcc mingw-w64-x86_64-pkg-config \
+          mingw-w64-x86_64-opus mingw-w64-x86_64-opusfile
+```
+
+All subsequent `go build`, `go test`, and `make` commands must be run from a shell with the MSYS2 MinGW 64-bit toolchain on PATH:
+
+```bash
+export PATH="/c/msys64/mingw64/bin:$PATH"
+```
+
 **Note:** `ffmpeg` is only required for HLS/m3u8 stream support. Local files and direct HTTP MP3 streams work without it.
 
 ### Build
@@ -164,6 +179,8 @@ Or build individually:
 make server  # Builds sendspin-server
 make player  # Builds sendspin-player
 ```
+
+On Windows, both binaries are produced in the repo root as `sendspin-server.exe` and `sendspin-player.exe`. Run them from the same MSYS2 MinGW 64-bit shell (or from cmd/PowerShell once the MSYS2 runtime DLLs are on PATH).
 
 ## Usage
 
@@ -282,7 +299,7 @@ Lower-level building blocks for custom implementations:
 - **`pkg/audio/decode`**: PCM, Opus, FLAC, MP3 decoders
 - **`pkg/audio/encode`**: PCM, Opus encoders
 - **`pkg/audio/resample`**: Sample rate conversion
-- **`pkg/audio/output`**: PortAudio playback
+- **`pkg/audio/output`**: Audio playback via malgo (miniaudio); 16/24/32-bit native
 - **`pkg/protocol`**: WebSocket client, message types
 - **`pkg/sync`**: Clock synchronization with drift compensation
 - **`pkg/discovery`**: mDNS service discovery
@@ -375,83 +392,62 @@ Found a bug or have a feature request? Please check existing issues or create a 
 
 **[View Issues](https://github.com/Sendspin/sendspin-go/issues)**
 
+### Recently Shipped
+
+**v1.2.0** — drop the oto backend and unify on malgo for true 24-bit output (see [#3](https://github.com/Sendspin/sendspin-go/issues/3) and [#26](https://github.com/Sendspin/sendspin-go/pull/26))
+
+**v1.1.0** — server-initiated client discovery, Kalman clock filter, code-path audit
+
 ### Known Issues & Todo
 
-**High Priority:**
-
-- [ ] Verify hi-res audio (96kHz/192kHz) compatibility with Music Assistant and other Sendspin servers
-- [ ] Test multi-room synchronization accuracy with 5+ players
-- [ ] Audit protocol implementation for spec compliance as official spec evolves
-- [ ] Performance profiling and optimization for CPU/memory usage
-- [ ] Add comprehensive integration tests with real audio files
-
-**Protocol & Compatibility:**
+**Protocol & compatibility:**
 
 - [ ] Validate all message types match latest Sendspin Protocol spec
-- [ ] Test with Music Assistant server
-- [ ] Test with other Sendspin protocol implementations
-- [ ] Document any protocol extensions or deviations
-- [ ] Add protocol version negotiation
+- [ ] Test with additional Sendspin-compatible servers beyond Music Assistant
+- [ ] Document protocol extensions or deviations
+- [ ] Explicit protocol-version negotiation (versioned roles like `player@v1` exist; a numeric version handshake does not)
 
-**Audio Quality:**
+**Audio:**
 
-- [ ] Verify 24-bit audio pipeline maintains full bit depth
 - [ ] Test sample rate conversion quality (FLAC 96kHz → Opus 48kHz)
-- [ ] Add audio quality metrics and testing
-- [ ] Support for gapless playback
+- [ ] Real FLAC streaming decoder (currently a stub — see [#34](https://github.com/Sendspin/sendspin-go/issues/34))
+- [ ] Gapless playback
 - [ ] Volume curve optimization (currently linear)
-
-**Features:**
-
-- [ ] FLAC and MP3 decoder implementation (currently stubs)
 - [ ] Visualizer role support (FFT spectrum data)
-- [ ] Album artwork support (already in protocol)
-- [ ] Player groups and zones
-- [ ] Playlist/queue management
-- [ ] Cross-fade between tracks
 
 **Stability:**
 
 - [ ] Reconnection handling and automatic retry
-- [ ] Network error recovery
 - [ ] Graceful degradation on clock sync loss
 - [ ] Memory leak testing for long-running sessions
-- [ ] Stress testing with many clients
+- [ ] Stress testing with many clients and multi-room sync accuracy with 5+ players
 
-**Developer Experience:**
+**Features:**
 
-- [ ] Add godoc examples for all public APIs
-- [ ] CI/CD pipeline for automated testing
-- [ ] Cross-platform testing (Linux/macOS/Windows)
+- [ ] Album artwork end-to-end (downloader exists; not fully wired to TUI surfaces)
+- [ ] Player groups and zones
+- [ ] Playlist/queue management
+- [ ] Cross-fade between tracks
+
+**Developer experience:**
+
+- [ ] Godoc examples for all public APIs
+- [ ] Automated cross-platform test matrix (CI runs Linux only today)
 - [ ] Docker containers for easy deployment
 - [ ] Benchmarking suite
+- [ ] Clean up pre-existing tech debt surfaced by [PR #26](https://github.com/Sendspin/sendspin-go/pull/26): see issues [#27–#34](https://github.com/Sendspin/sendspin-go/issues)
 
 ### Roadmap
 
-**v0.9.x (Current - Library Stabilization)**
+**Released**
 
-- Fix bugs discovered during testing
-- Improve protocol compliance
-- Add integration tests
+- **v1.2.0** — oto backend removed, malgo is the only audio output, true 24-bit pipeline end-to-end
+- **v1.1.0** — server-initiated client discovery, Kalman time filter, protocol audit fixes
+- **v1.0.0** — initial stable release, Music Assistant compatibility, precise multi-room sync
 
-**v1.0.0 (Stable Release)**
+**Planned**
 
-- Complete FLAC/MP3 decoder implementation
-- Full Music Assistant compatibility verified
-- 100% protocol spec compliance
-- Production-ready stability
-
-**v1.1.0 (Enhanced Features)**
-
-- Album artwork support
-- Gapless playback
-- Advanced volume controls
-
-**v2.0.0 (Advanced Multi-Room)**
-
-- Player groups and zones
-- Synchronized playback controls
-- Playlist management
+- **v2.0.0 (Advanced Multi-Room)** — player groups and zones, synchronized playback controls, playlist management
 
 ## Protocol
 
@@ -460,11 +456,13 @@ Implements the [Sendspin Protocol](https://github.com/Sendspin/spec) specificati
 **Implementation Status:**
 
 - ✅ WebSocket transport
-- ✅ Client/Server handshake
-- ✅ Clock synchronization (NTP-style)
-- ✅ Audio streaming (binary frames)
-- ✅ Metadata messages
-- ✅ Control commands
-- ✅ Multi-codec support (Opus, PCM)
+- ✅ Client/Server handshake with versioned role negotiation (`player@v1`, `metadata@v1`)
+- ✅ Clock synchronization (NTP-style, two-dimensional Kalman filter on offset + drift)
+- ✅ Audio streaming (binary frames, microsecond timestamps)
+- ✅ Metadata messages (via `server/state`)
+- ✅ Control commands (volume, mute)
+- ✅ Multi-codec support (Opus with server-side resampling, 24-bit PCM)
+- ✅ True 24-bit audio output via malgo (v1.2.0)
+- ✅ Server-initiated client discovery (v1.1.0)
+- ⚠️ Album artwork — downloader exists, not fully wired through to all TUI surfaces
 - ⚠️ Visualizer role (planned)
-- ⚠️ Album artwork (protocol support exists, not implemented)
