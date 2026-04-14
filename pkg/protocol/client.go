@@ -55,7 +55,7 @@ type Client struct {
 }
 
 type AudioChunk struct {
-	Timestamp int64  // Microseconds, server clock
+	Timestamp int64 // Microseconds, server clock
 	Data      []byte
 }
 
