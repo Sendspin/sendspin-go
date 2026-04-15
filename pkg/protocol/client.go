@@ -70,6 +70,15 @@ type Client struct {
 	ServerState   chan ServerStateMessage
 	GroupUpdate   chan GroupUpdate
 
+	// serverHello holds the parsed server/hello message received during
+	// handshake. Nil until Start()/Connect() completes successfully.
+	serverHello *ServerHello
+
+	// rawServerHello holds the raw JSON envelope bytes of the server/hello
+	// message, useful for conformance testing and protocol debugging where
+	// the exact wire representation matters.
+	rawServerHello []byte
+
 	connected bool
 	ctx       context.Context
 	cancel    context.CancelFunc
@@ -213,6 +222,23 @@ func (c *Client) handshake() error {
 		return fmt.Errorf("expected server/hello, got %s", serverMsg.Type)
 	}
 
+	// Parse the server hello payload into a typed struct and cache both
+	// the parsed form and the raw envelope bytes for later retrieval via
+	// ServerHello() / RawServerHello().
+	payloadBytes, err := json.Marshal(serverMsg.Payload)
+	if err != nil {
+		return fmt.Errorf("failed to re-marshal server/hello payload: %w", err)
+	}
+	var parsedHello ServerHello
+	if err := json.Unmarshal(payloadBytes, &parsedHello); err != nil {
+		return fmt.Errorf("failed to decode server/hello payload: %w", err)
+	}
+
+	c.mu.Lock()
+	c.serverHello = &parsedHello
+	c.rawServerHello = append([]byte(nil), data...)
+	c.mu.Unlock()
+
 	log.Printf("Handshake complete with server")
 
 	// Send initial state per spec (client/state with nested player object)
@@ -234,6 +260,40 @@ func (c *Client) handshake() error {
 	}
 
 	return nil
+}
+
+// ServerHello returns the parsed server/hello message received during
+// handshake, or nil if handshake has not yet completed. Safe for concurrent
+// reads; callers should not mutate the returned struct.
+func (c *Client) ServerHello() *ServerHello {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+	return c.serverHello
+}
+
+// RawServerHello returns the raw JSON envelope bytes of the server/hello
+// message received during handshake, or nil if handshake has not yet
+// completed. Useful for conformance testing and protocol debugging where
+// the exact wire representation matters. Returns a fresh copy; callers
+// may mutate it without affecting the client.
+func (c *Client) RawServerHello() []byte {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+	if c.rawServerHello == nil {
+		return nil
+	}
+	out := make([]byte, len(c.rawServerHello))
+	copy(out, c.rawServerHello)
+	return out
+}
+
+// Send writes a typed envelope to the connected peer. The message is
+// wrapped as {"type": msgType, "payload": payload} and sent as a text
+// WebSocket frame. Use this for protocol messages the library does not
+// yet have a dedicated sender for (e.g. client/command in controller
+// scenarios).
+func (c *Client) Send(msgType string, payload any) error {
+	return c.sendJSON(Message{Type: msgType, Payload: payload})
 }
 
 // buildSupportedRoles returns the role list for the client/hello message.
