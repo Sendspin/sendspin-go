@@ -37,6 +37,11 @@ jobs:
           git clone --depth 1 https://github.com/Sendspin/aiosendspin.git \
             conformance/repos/aiosendspin
 
+      - name: Clone sendspin-cli (supplies the FLAC test fixture)
+        run: |
+          git clone --depth 1 https://github.com/Sendspin/sendspin-cli.git \
+            conformance/repos/sendspin-cli
+
       - name: Pin sendspin-go adapter at the PR checkout
         run: |
           mkdir -p conformance/repos
