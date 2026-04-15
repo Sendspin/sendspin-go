@@ -6,6 +6,8 @@ import (
 	"context"
 	"fmt"
 	"log"
+	"math/rand"
+	"time"
 
 	"github.com/Sendspin/sendspin-go/pkg/audio"
 	"github.com/Sendspin/sendspin-go/pkg/audio/decode"
@@ -13,6 +15,24 @@ import (
 	"github.com/Sendspin/sendspin-go/pkg/protocol"
 	"github.com/Sendspin/sendspin-go/pkg/sync"
 )
+
+// ReconnectConfig controls automatic reconnect behavior after the protocol
+// connection drops. When Enabled is false (the zero value), Player behaves
+// as a one-shot: a lost connection stays lost.
+type ReconnectConfig struct {
+	Enabled      bool
+	InitialDelay time.Duration // default 500ms
+	MaxDelay     time.Duration // default 30s
+	Multiplier   float64       // default 2.0
+	MaxAttempts  int           // 0 = infinite (default)
+
+	// Rediscover is an optional callback invoked before each reconnect
+	// attempt. Returning a non-empty address overrides the configured
+	// ServerAddr for that attempt. Use this to re-run mDNS discovery when
+	// the server may have moved. Errors are logged and the attempt falls
+	// back to the last known address.
+	Rediscover func(ctx context.Context) (string, error)
+}
 
 // PlayerConfig holds player configuration
 type PlayerConfig struct {
@@ -52,6 +72,10 @@ type PlayerConfig struct {
 	// ProcessCallback is called with decoded samples before they are written to output.
 	// Must not block. Runs on the audio consumption goroutine.
 	ProcessCallback func([]int32)
+
+	// Reconnect controls automatic reconnection behavior when the protocol
+	// connection drops. Disabled by default.
+	Reconnect ReconnectConfig
 }
 
 type DeviceInfo struct {
@@ -109,6 +133,17 @@ func NewPlayer(config PlayerConfig) (*Player, error) {
 	if config.BufferMs == 0 {
 		config.BufferMs = 500
 	}
+	if config.Reconnect.Enabled {
+		if config.Reconnect.InitialDelay <= 0 {
+			config.Reconnect.InitialDelay = 500 * time.Millisecond
+		}
+		if config.Reconnect.MaxDelay <= 0 {
+			config.Reconnect.MaxDelay = 30 * time.Second
+		}
+		if config.Reconnect.Multiplier <= 1.0 {
+			config.Reconnect.Multiplier = 2.0
+		}
+	}
 
 	ctx, cancel := context.WithCancel(context.Background())
 
@@ -127,8 +162,30 @@ func NewPlayer(config PlayerConfig) (*Player, error) {
 }
 
 func (p *Player) Connect() error {
-	recv, err := NewReceiver(ReceiverConfig{
-		ServerAddr:     p.config.ServerAddr,
+	recv, err := p.buildReceiver(p.config.ServerAddr)
+	if err != nil {
+		return err
+	}
+	if err := recv.Connect(); err != nil {
+		return err
+	}
+
+	p.receiver = recv
+	p.state.Connected = true
+	p.notifyStateChange()
+
+	go p.consumeAudio(recv)
+
+	if p.config.Reconnect.Enabled {
+		go p.runReconnectLoop(recv)
+	}
+
+	return nil
+}
+
+func (p *Player) buildReceiver(addr string) (*Receiver, error) {
+	return NewReceiver(ReceiverConfig{
+		ServerAddr:     addr,
 		PlayerName:     p.config.PlayerName,
 		BufferMs:       p.config.BufferMs,
 		StaticDelayMs:  p.config.StaticDelayMs,
@@ -139,22 +196,98 @@ func (p *Player) Connect() error {
 		OnStreamEnd:    p.onStreamEnd,
 		OnError:        p.config.OnError,
 	})
-	if err != nil {
-		return err
+}
+
+// runReconnectLoop supervises the active receiver and rebuilds it with
+// exponential backoff whenever its Done channel closes. Exits when the
+// Player context is cancelled.
+func (p *Player) runReconnectLoop(initial *Receiver) {
+	current := initial
+	for {
+		select {
+		case <-p.ctx.Done():
+			return
+		case <-current.Done():
+		}
+
+		// Connection lost. Enter reconnecting state and back off.
+		select {
+		case <-p.ctx.Done():
+			return
+		default:
+		}
+
+		p.state.Connected = false
+		p.state.State = "reconnecting"
+		p.notifyStateChange()
+
+		next, ok := p.reconnectWithBackoff()
+		if !ok {
+			return
+		}
+		current = next
+
+		p.receiver = current
+		p.state.Connected = true
+		p.notifyStateChange()
+
+		go p.consumeAudio(current)
 	}
+}
 
-	p.receiver = recv
+func (p *Player) reconnectWithBackoff() (*Receiver, bool) {
+	cfg := p.config.Reconnect
+	delay := cfg.InitialDelay
+	attempt := 0
 
-	if err := recv.Connect(); err != nil {
-		return err
+	for {
+		attempt++
+		if cfg.MaxAttempts > 0 && attempt > cfg.MaxAttempts {
+			p.notifyError(fmt.Errorf("reconnect: gave up after %d attempts", cfg.MaxAttempts))
+			return nil, false
+		}
+
+		// Jittered sleep (±20%).
+		jittered := jitter(delay, 0.2)
+		log.Printf("Reconnect attempt %d in %v", attempt, jittered)
+		select {
+		case <-p.ctx.Done():
+			return nil, false
+		case <-time.After(jittered):
+		}
+
+		addr := p.config.ServerAddr
+		if cfg.Rediscover != nil {
+			discovered, err := cfg.Rediscover(p.ctx)
+			if err != nil {
+				log.Printf("Reconnect: rediscover failed: %v (using last known addr %s)", err, addr)
+			} else if discovered != "" {
+				addr = discovered
+			}
+		}
+
+		recv, err := p.buildReceiver(addr)
+		if err == nil {
+			if err = recv.Connect(); err == nil {
+				log.Printf("Reconnect: connected to %s on attempt %d", addr, attempt)
+				return recv, true
+			}
+		}
+		log.Printf("Reconnect attempt %d to %s failed: %v", attempt, addr, err)
+
+		delay = time.Duration(float64(delay) * cfg.Multiplier)
+		if delay > cfg.MaxDelay {
+			delay = cfg.MaxDelay
+		}
 	}
+}
 
-	p.state.Connected = true
-	p.notifyStateChange()
-
-	go p.consumeAudio()
-
-	return nil
+func jitter(d time.Duration, frac float64) time.Duration {
+	if d <= 0 {
+		return d
+	}
+	delta := (rand.Float64()*2 - 1) * frac
+	return time.Duration(float64(d) * (1 + delta))
 }
 
 func (p *Player) onStreamStart(format audio.Format) {
@@ -183,10 +316,10 @@ func (p *Player) onStreamEnd() {
 	p.notifyStateChange()
 }
 
-func (p *Player) consumeAudio() {
+func (p *Player) consumeAudio(recv *Receiver) {
 	for {
 		select {
-		case buf, ok := <-p.receiver.Output():
+		case buf, ok := <-recv.Output():
 			if !ok {
 				return
 			}

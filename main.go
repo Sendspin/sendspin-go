@@ -3,6 +3,7 @@
 package main
 
 import (
+	"context"
 	"flag"
 	"fmt"
 	"io"
@@ -31,6 +32,7 @@ var (
 	streamLogs    = flag.Bool("stream-logs", false, "Alias for -no-tui")
 	productName   = flag.String("product-name", "", "Override the product name sent in device_info (default: compiled-in identity)")
 	manufacturer  = flag.String("manufacturer", "", "Override the manufacturer sent in device_info (default: compiled-in identity)")
+	noReconnect   = flag.Bool("no-reconnect", false, "Disable automatic reconnect on connection loss")
 )
 
 func main() {
@@ -89,9 +91,10 @@ func main() {
 	}
 
 	var serverAddress string
+	var disc *discovery.Manager
 	if *serverAddr == "" {
 		log.Printf("Searching for servers via mDNS (press Ctrl+C to quit)...")
-		disc := discovery.NewManager(discovery.Config{
+		disc = discovery.NewManager(discovery.Config{
 			ServiceName: playerName,
 			Port:        *port,
 		})
@@ -138,13 +141,15 @@ func main() {
 				Channels:   state.Channels,
 				BitDepth:   state.BitDepth,
 			})
-			if state.Connected {
-				connected := true
-				updateTUI(ui.StatusMsg{
-					Connected:  &connected,
-					ServerName: serverAddress,
-				})
+			connected := state.Connected
+			serverLabel := serverAddress
+			if state.State == "reconnecting" {
+				serverLabel = "reconnecting..."
 			}
+			updateTUI(ui.StatusMsg{
+				Connected:  &connected,
+				ServerName: serverLabel,
+			})
 		},
 		OnMetadata: func(meta sendspin.Metadata) {
 			updateTUI(ui.StatusMsg{
@@ -156,6 +161,25 @@ func main() {
 		OnError: func(err error) {
 			log.Printf("Player error: %v", err)
 		},
+		Reconnect: sendspin.ReconnectConfig{
+			Enabled: !*noReconnect,
+		},
+	}
+
+	if !*noReconnect && disc != nil {
+		config.Reconnect.Rediscover = func(ctx context.Context) (string, error) {
+			disc.Browse()
+			select {
+			case server := <-disc.Servers():
+				addr := fmt.Sprintf("%s:%d", server.Host, server.Port)
+				log.Printf("Rediscovered server at %s", addr)
+				return addr, nil
+			case <-ctx.Done():
+				return "", ctx.Err()
+			case <-time.After(5 * time.Second):
+				return "", fmt.Errorf("rediscover timed out")
+			}
+		}
 	}
 
 	player, err := sendspin.NewPlayer(config)
