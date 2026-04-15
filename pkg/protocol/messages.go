@@ -113,9 +113,27 @@ type StreamStartPlayer struct {
 	CodecHeader string `json:"codec_header,omitempty"` // Base64-encoded
 }
 
-// StreamStart notifies the client of stream format (nested structure)
+// StreamStartArtwork describes the artwork channels a server is about to send.
+// Distinct from ArtworkV1Support (client hello): the hello advertises what the
+// client can accept (media_width/height), while this describes the actual
+// dimensions of the image about to be streamed (width/height).
+type StreamStartArtwork struct {
+	Channels []ArtworkStreamChannel `json:"channels"`
+}
+
+// ArtworkStreamChannel is a single channel entry inside StreamStartArtwork.
+type ArtworkStreamChannel struct {
+	Source string `json:"source"` // "album", "artist", etc.
+	Format string `json:"format"` // "jpeg", "png", "bmp"
+	Width  int    `json:"width"`
+	Height int    `json:"height"`
+}
+
+// StreamStart notifies the client of stream format (nested structure).
+// Player and Artwork fields are independent — a server may send either or both.
 type StreamStart struct {
-	Player *StreamStartPlayer `json:"player,omitempty"`
+	Player  *StreamStartPlayer  `json:"player,omitempty"`
+	Artwork *StreamStartArtwork `json:"artwork,omitempty"`
 }
 
 // ServerStateMessage is sent as server/state with role-specific objects
