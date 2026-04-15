@@ -187,9 +187,16 @@ func (c *Client) handshake() error {
 		Version:             c.config.Version,
 		SupportedRoles:      roles,
 		DeviceInfo:          &c.config.DeviceInfo,
-		PlayerV1Support:     &c.config.PlayerV1Support,
 		ArtworkV1Support:    c.config.ArtworkV1Support,
 		VisualizerV1Support: c.config.VisualizerV1Support,
+	}
+	// Only advertise player@v1_support when player@v1 is in the role list.
+	// Strict peers (aiosendspin) reject a client/hello that carries a
+	// player@v1_support block without a matching role because the schema
+	// marks supported_formats as non-nullable, and a zero-value Go
+	// PlayerV1Support encodes its nil slice as JSON null.
+	if containsRole(roles, "player@v1") {
+		hello.PlayerV1Support = &c.config.PlayerV1Support
 	}
 
 	msg := Message{
@@ -294,6 +301,16 @@ func (c *Client) RawServerHello() []byte {
 // scenarios).
 func (c *Client) Send(msgType string, payload any) error {
 	return c.sendJSON(Message{Type: msgType, Payload: payload})
+}
+
+// containsRole reports whether the given role is in the list.
+func containsRole(roles []string, role string) bool {
+	for _, r := range roles {
+		if r == role {
+			return true
+		}
+	}
+	return false
 }
 
 // buildSupportedRoles returns the role list for the client/hello message.
