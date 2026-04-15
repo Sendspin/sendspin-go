@@ -4,8 +4,15 @@ package protocol
 
 import (
 	"encoding/binary"
+	"encoding/json"
+	"net/http"
+	"net/http/httptest"
+	"reflect"
+	"strings"
 	"testing"
 	"time"
+
+	"github.com/gorilla/websocket"
 )
 
 func TestNewClient(t *testing.T) {
@@ -135,5 +142,208 @@ func TestHandleBinaryMessage_UnknownTypeLogged(t *testing.T) {
 	}
 	if _, ok := recvArtworkChunk(t, client.ArtworkChunks); ok {
 		t.Error("unknown type was routed to ArtworkChunks")
+	}
+}
+
+// TestBuildSupportedRoles_Default covers the old auto-built path. Keep this
+// test lean; a table test for every permutation of the four V1 support
+// fields is over-investment for what's essentially a handful of if
+// statements.
+func TestBuildSupportedRoles_Default(t *testing.T) {
+	cases := []struct {
+		name   string
+		config Config
+		want   []string
+	}{
+		{
+			name:   "bare default is player+metadata",
+			config: Config{},
+			want:   []string{"player@v1", "metadata@v1"},
+		},
+		{
+			name:   "artwork support adds artwork@v1",
+			config: Config{ArtworkV1Support: &ArtworkV1Support{}},
+			want:   []string{"player@v1", "metadata@v1", "artwork@v1"},
+		},
+		{
+			name:   "visualizer support adds visualizer@v1",
+			config: Config{VisualizerV1Support: &VisualizerV1Support{}},
+			want:   []string{"player@v1", "metadata@v1", "visualizer@v1"},
+		},
+		{
+			name: "both support structs set",
+			config: Config{
+				ArtworkV1Support:    &ArtworkV1Support{},
+				VisualizerV1Support: &VisualizerV1Support{},
+			},
+			want: []string{"player@v1", "metadata@v1", "artwork@v1", "visualizer@v1"},
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			client := NewClient(tc.config)
+			got := client.buildSupportedRoles()
+			if !reflect.DeepEqual(got, tc.want) {
+				t.Errorf("buildSupportedRoles() = %v, want %v", got, tc.want)
+			}
+		})
+	}
+}
+
+// TestBuildSupportedRoles_ExplicitOverride verifies that Config.SupportedRoles
+// wins over the V1 support struct auto-build. This is the load-bearing
+// behavior for conformance metadata-only and controller scenarios that
+// need to NOT advertise player@v1.
+func TestBuildSupportedRoles_ExplicitOverride(t *testing.T) {
+	cases := []struct {
+		name   string
+		config Config
+		want   []string
+	}{
+		{
+			name:   "controller only",
+			config: Config{SupportedRoles: []string{"controller@v1"}},
+			want:   []string{"controller@v1"},
+		},
+		{
+			name:   "metadata only",
+			config: Config{SupportedRoles: []string{"metadata@v1"}},
+			want:   []string{"metadata@v1"},
+		},
+		{
+			// Confirms that setting ArtworkV1Support alongside an override
+			// does NOT inject artwork@v1 — the caller's override is canon.
+			name: "override wins over artwork support struct",
+			config: Config{
+				SupportedRoles:   []string{"player@v1"},
+				ArtworkV1Support: &ArtworkV1Support{},
+			},
+			want: []string{"player@v1"},
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			client := NewClient(tc.config)
+			got := client.buildSupportedRoles()
+			if !reflect.DeepEqual(got, tc.want) {
+				t.Errorf("buildSupportedRoles() = %v, want %v", got, tc.want)
+			}
+		})
+	}
+}
+
+// TestNewClientFromConn_HandshakeAndClose spins up a local WebSocket server
+// that plays the Sendspin handshake dance (read client/hello, send
+// server/hello, read client/state, close). The test then uses
+// NewClientFromConn + Start to drive the client side over an accepted
+// connection, proving that server-initiated scenarios can use the library
+// without hand-rolling the message loop.
+func TestNewClientFromConn_HandshakeAndClose(t *testing.T) {
+	// Capture the roles the client advertises so we can assert the override
+	// plumbed through to the wire.
+	capturedHello := make(chan ClientHello, 1)
+
+	upgrader := websocket.Upgrader{
+		CheckOrigin: func(*http.Request) bool { return true },
+	}
+	handler := func(w http.ResponseWriter, r *http.Request) {
+		conn, err := upgrader.Upgrade(w, r, nil)
+		if err != nil {
+			t.Errorf("upgrade: %v", err)
+			return
+		}
+		defer conn.Close()
+
+		// Read client/hello.
+		_, helloBytes, err := conn.ReadMessage()
+		if err != nil {
+			t.Errorf("read client/hello: %v", err)
+			return
+		}
+		var envelope Message
+		if err := json.Unmarshal(helloBytes, &envelope); err != nil {
+			t.Errorf("unmarshal client/hello: %v", err)
+			return
+		}
+		payloadBytes, _ := json.Marshal(envelope.Payload)
+		var hello ClientHello
+		_ = json.Unmarshal(payloadBytes, &hello)
+		capturedHello <- hello
+
+		// Send server/hello.
+		serverHello := Message{
+			Type: "server/hello",
+			Payload: ServerHello{
+				ServerID:    "test-server",
+				Name:        "Test Server",
+				Version:     1,
+				ActiveRoles: hello.SupportedRoles,
+			},
+		}
+		if err := conn.WriteJSON(serverHello); err != nil {
+			t.Errorf("write server/hello: %v", err)
+			return
+		}
+
+		// Read client/state (the library sends this immediately after
+		// a successful handshake — see handshake() in client.go).
+		if _, _, err := conn.ReadMessage(); err != nil {
+			t.Errorf("read client/state: %v", err)
+			return
+		}
+
+		// Hold the connection open briefly so the client's read loop has
+		// something to read, then close.
+		time.Sleep(50 * time.Millisecond)
+	}
+
+	server := httptest.NewServer(http.HandlerFunc(handler))
+	defer server.Close()
+
+	// Dial it ourselves to simulate a server-initiated scenario where the
+	// caller has an accepted *websocket.Conn and hands it to the library.
+	wsURL := "ws" + strings.TrimPrefix(server.URL, "http")
+	conn, _, err := websocket.DefaultDialer.Dial(wsURL, nil)
+	if err != nil {
+		t.Fatalf("dial: %v", err)
+	}
+
+	client := NewClientFromConn(Config{
+		ClientID:       "test-from-conn",
+		Name:           "FromConn Test",
+		Version:        1,
+		SupportedRoles: []string{"controller@v1"},
+	}, conn)
+	defer client.Close()
+
+	if err := client.Start(); err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+
+	select {
+	case hello := <-capturedHello:
+		if !reflect.DeepEqual(hello.SupportedRoles, []string{"controller@v1"}) {
+			t.Errorf("server saw SupportedRoles = %v, want [controller@v1]", hello.SupportedRoles)
+		}
+		if hello.ClientID != "test-from-conn" {
+			t.Errorf("server saw ClientID = %q, want test-from-conn", hello.ClientID)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("server never captured a client/hello")
+	}
+}
+
+// TestStart_NoConnection confirms Start refuses to run without a connection
+// in place. Prevents a future caller from assuming Start does its own dialing.
+func TestStart_NoConnection(t *testing.T) {
+	client := NewClient(Config{ServerAddr: "localhost:0", ClientID: "t", Name: "t"})
+	err := client.Start()
+	if err == nil {
+		t.Fatal("expected error when Start is called with no connection")
+	}
+	if !strings.Contains(err.Error(), "no connection") {
+		t.Errorf("error message = %q, want substring %q", err.Error(), "no connection")
 	}
 }
