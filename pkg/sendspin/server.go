@@ -250,6 +250,11 @@ func (s *Server) Stop() {
 	})
 }
 
+// getClockMicros returns server uptime in microseconds (monotonic, not wall clock).
+func (s *Server) getClockMicros() int64 {
+	return time.Since(s.clockStart).Microseconds()
+}
+
 // Group returns the server's default playback group. For M2 there is
 // exactly one implicit group per Server; the accessor exists so future
 // GroupRole implementations (M3) can subscribe to its event bus.
