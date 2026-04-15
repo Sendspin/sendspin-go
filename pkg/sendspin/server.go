@@ -249,16 +249,14 @@ func (s *Server) Clients() []ClientInfo {
 
 	clients := make([]ClientInfo, 0, len(s.clients))
 	for _, c := range s.clients {
-		c.mu.RLock()
 		clients = append(clients, ClientInfo{
-			ID:     c.id,
-			Name:   c.name,
-			State:  c.state,
-			Volume: c.volume,
-			Muted:  c.muted,
-			Codec:  c.codec,
+			ID:     c.ID(),
+			Name:   c.Name(),
+			State:  c.State(),
+			Volume: c.Volume(),
+			Muted:  c.Muted(),
+			Codec:  c.Codec(),
 		})
-		c.mu.RUnlock()
 	}
 
 	return clients
