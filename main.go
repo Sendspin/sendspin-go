@@ -14,7 +14,6 @@ import (
 	"time"
 
 	"github.com/Sendspin/sendspin-go/internal/discovery"
-	internalsync "github.com/Sendspin/sendspin-go/internal/sync"
 	"github.com/Sendspin/sendspin-go/internal/ui"
 	"github.com/Sendspin/sendspin-go/internal/version"
 	"github.com/Sendspin/sendspin-go/pkg/sendspin"
@@ -204,17 +203,6 @@ func statsUpdateLoop(player *sendspin.Player, updateTUI func(ui.StatusMsg)) {
 	for range ticker.C {
 		stats := player.Stats()
 
-		// Convert pkg/sync.Quality to internal/sync.Quality
-		var syncQuality internalsync.Quality
-		switch stats.SyncQuality {
-		case 0: // QualityGood
-			syncQuality = internalsync.QualityGood
-		case 1: // QualityDegraded
-			syncQuality = internalsync.QualityDegraded
-		case 2: // QualityLost
-			syncQuality = internalsync.QualityLost
-		}
-
 		// NumGoroutine is cheap; ReadMemStats removed to avoid stop-the-world pauses
 		updateTUI(ui.StatusMsg{
 			Received:    stats.Received,
@@ -222,7 +210,7 @@ func statsUpdateLoop(player *sendspin.Player, updateTUI func(ui.StatusMsg)) {
 			Dropped:     stats.Dropped,
 			BufferDepth: stats.BufferDepth,
 			SyncRTT:     stats.SyncRTT,
-			SyncQuality: syncQuality,
+			SyncQuality: stats.SyncQuality,
 			Goroutines:  runtime.NumGoroutine(),
 			MemAlloc:    0,
 			MemSys:      0,

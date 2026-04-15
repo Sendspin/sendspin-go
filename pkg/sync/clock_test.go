@@ -68,31 +68,6 @@ func TestServerToLocalTimeConversion(t *testing.T) {
 	}
 }
 
-func TestServerMicrosNow(t *testing.T) {
-	cs := NewClockSync()
-	SetGlobalClockSync(cs)
-
-	before := time.Now().UnixMicro()
-	serverNow1 := ServerMicrosNow()
-	after := time.Now().UnixMicro()
-
-	if serverNow1 < before || serverNow1 > after {
-		t.Error("expected ServerMicrosNow to return Unix time before sync")
-	}
-
-	clientNow := time.Now().UnixMicro()
-	serverLoopTime := int64(3000000)
-
-	cs.ProcessSyncResponse(clientNow-1000, serverLoopTime, serverLoopTime+50, clientNow)
-
-	serverNow2 := ServerMicrosNow()
-
-	// Should be in the ballpark of serverLoopTime (within 100ms)
-	if serverNow2 < serverLoopTime-100000 || serverNow2 > serverLoopTime+100000 {
-		t.Errorf("ServerMicrosNow returned %d, expected around %d", serverNow2, serverLoopTime)
-	}
-}
-
 func TestQualityTracking(t *testing.T) {
 	cs := NewClockSync()
 
@@ -167,7 +142,6 @@ func TestClockSync_ServerMicrosNow(t *testing.T) {
 
 func TestConcurrentAccess(t *testing.T) {
 	cs := NewClockSync()
-	SetGlobalClockSync(cs)
 
 	cs.ProcessSyncResponse(1000000, 1000, 1100, 1025000)
 
@@ -177,7 +151,7 @@ func TestConcurrentAccess(t *testing.T) {
 			for j := 0; j < 100; j++ {
 				cs.GetStats()
 				cs.CheckQuality()
-				ServerMicrosNow()
+				cs.ServerMicrosNow()
 				cs.ServerToLocalTime(int64(j * 1000))
 				cs.ProcessSyncResponse(
 					int64(1000000+j), int64(1000+j),

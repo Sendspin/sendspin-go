@@ -95,9 +95,6 @@ jobs:
         # Player
         go build -ldflags "${LDFLAGS}" -o "dist/sendspin-player-${BUILD_OS}-${BUILD_ARCH}" .
 
-        # MA Player
-        go build -ldflags "${LDFLAGS}" -o "dist/ma-player-${BUILD_OS}-${BUILD_ARCH}" ./cmd/ma-player
-
         # Show dependencies for verification
         echo "Player dependencies:"
         ldd "dist/sendspin-player-${BUILD_OS}-${BUILD_ARCH}" || true
@@ -170,7 +167,6 @@ jobs:
           **Linux (x86_64) - Portable Binaries**
 
           - **Player:** `sendspin-player-linux-amd64.tar.gz`
-          - **MA Player:** `ma-player-linux-amd64.tar.gz`
 
           ### Installation
 
