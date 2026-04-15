@@ -19,9 +19,19 @@ const (
 	// BinaryMessageHeaderSize is the size of binary message header (type byte + timestamp)
 	BinaryMessageHeaderSize = 1 + 8 // 9 bytes: 1 byte type + 8 byte timestamp
 
-	// AudioChunkMessageType is the binary message type ID for audio chunks
-	// Per spec: Player role binary messages use IDs 4-7 (bits 000001xx), slot 0 is audio
+	// AudioChunkMessageType is the binary message type ID for audio chunks.
+	// Per spec: Player role binary messages use IDs 4-7 (bits 000001xx), slot 0 is audio.
 	AudioChunkMessageType = 4
+
+	// Artwork binary message type IDs per spec: Artwork role uses 8-11, one per channel.
+	// ArtworkChannel0MessageType is channel 0; channels 1-3 use 9, 10, 11 respectively.
+	ArtworkChannel0MessageType = 8
+	ArtworkChannel1MessageType = 9
+	ArtworkChannel2MessageType = 10
+	ArtworkChannel3MessageType = 11
+
+	// ArtworkChannelCount is the maximum number of artwork channels the spec allocates binary IDs for.
+	ArtworkChannelCount = 4
 )
 
 type Config struct {
@@ -40,14 +50,15 @@ type Client struct {
 	conn   *websocket.Conn
 	mu     sync.RWMutex
 
-	AudioChunks  chan AudioChunk
-	ControlMsgs  chan PlayerCommand
-	TimeSyncResp chan ServerTime
-	StreamStart  chan StreamStart
-	StreamClear  chan StreamClear
-	StreamEnd    chan StreamEnd
-	ServerState  chan ServerStateMessage
-	GroupUpdate  chan GroupUpdate
+	AudioChunks   chan AudioChunk
+	ArtworkChunks chan ArtworkChunk
+	ControlMsgs   chan PlayerCommand
+	TimeSyncResp  chan ServerTime
+	StreamStart   chan StreamStart
+	StreamClear   chan StreamClear
+	StreamEnd     chan StreamEnd
+	ServerState   chan ServerStateMessage
+	GroupUpdate   chan GroupUpdate
 
 	connected bool
 	ctx       context.Context
@@ -59,21 +70,29 @@ type AudioChunk struct {
 	Data      []byte
 }
 
+// ArtworkChunk is an incoming binary artwork frame routed from the artwork@v1 role.
+type ArtworkChunk struct {
+	Channel   int   // 0-3; derived from the binary message type minus ArtworkChannel0MessageType
+	Timestamp int64 // Microseconds, server clock
+	Data      []byte
+}
+
 func NewClient(config Config) *Client {
 	ctx, cancel := context.WithCancel(context.Background())
 
 	return &Client{
-		config:       config,
-		AudioChunks:  make(chan AudioChunk, 100),
-		ControlMsgs:  make(chan PlayerCommand, 10),
-		TimeSyncResp: make(chan ServerTime, 10),
-		StreamStart:  make(chan StreamStart, 1),
-		StreamClear:  make(chan StreamClear, 10),
-		StreamEnd:    make(chan StreamEnd, 1),
-		ServerState:  make(chan ServerStateMessage, 10),
-		GroupUpdate:  make(chan GroupUpdate, 10),
-		ctx:          ctx,
-		cancel:       cancel,
+		config:        config,
+		AudioChunks:   make(chan AudioChunk, 100),
+		ArtworkChunks: make(chan ArtworkChunk, 10),
+		ControlMsgs:   make(chan PlayerCommand, 10),
+		TimeSyncResp:  make(chan ServerTime, 10),
+		StreamStart:   make(chan StreamStart, 1),
+		StreamClear:   make(chan StreamClear, 10),
+		StreamEnd:     make(chan StreamEnd, 1),
+		ServerState:   make(chan ServerStateMessage, 10),
+		GroupUpdate:   make(chan GroupUpdate, 10),
+		ctx:           ctx,
+		cancel:        cancel,
 	}
 }
 
@@ -222,22 +241,26 @@ func (c *Client) handleBinaryMessage(data []byte) {
 	}
 
 	msgType := data[0]
-	if msgType != AudioChunkMessageType {
-		log.Printf("Unknown binary message type: %d", msgType)
-		return
-	}
-
 	timestamp := int64(binary.BigEndian.Uint64(data[1:BinaryMessageHeaderSize]))
-	audioData := data[BinaryMessageHeaderSize:]
+	payload := data[BinaryMessageHeaderSize:]
 
-	chunk := AudioChunk{
-		Timestamp: timestamp,
-		Data:      audioData,
-	}
-
-	select {
-	case c.AudioChunks <- chunk:
-	case <-c.ctx.Done():
+	switch {
+	case msgType == AudioChunkMessageType:
+		select {
+		case c.AudioChunks <- AudioChunk{Timestamp: timestamp, Data: payload}:
+		case <-c.ctx.Done():
+		}
+	case msgType >= ArtworkChannel0MessageType && msgType <= ArtworkChannel3MessageType:
+		select {
+		case c.ArtworkChunks <- ArtworkChunk{
+			Channel:   int(msgType) - ArtworkChannel0MessageType,
+			Timestamp: timestamp,
+			Data:      payload,
+		}:
+		case <-c.ctx.Done():
+		}
+	default:
+		log.Printf("Unknown binary message type: %d", msgType)
 	}
 }
 
