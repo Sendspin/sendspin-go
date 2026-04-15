@@ -19,6 +19,7 @@ type ReceiverConfig struct {
 	ServerAddr     string
 	PlayerName     string
 	BufferMs       int
+	StaticDelayMs  int // optional static latency compensation (ms) applied to every scheduled play time
 	DeviceInfo     DeviceInfo
 	DecoderFactory func(audio.Format) (decode.Decoder, error)
 	OnMetadata     func(Metadata)
@@ -231,7 +232,7 @@ func (r *Receiver) handleStreamStart() {
 			}
 
 			r.schedulerCtx, r.schedulerCancel = context.WithCancel(r.ctx)
-			r.scheduler = NewScheduler(r.clockSync, r.config.BufferMs)
+			r.scheduler = NewScheduler(r.clockSync, r.config.BufferMs, r.config.StaticDelayMs)
 			go r.scheduler.Run()
 			go r.pumpSchedulerOutput(r.schedulerCtx)
 

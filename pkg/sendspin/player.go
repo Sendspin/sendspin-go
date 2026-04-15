@@ -27,6 +27,12 @@ type PlayerConfig struct {
 	// BufferMs is the playback buffer size in milliseconds (default: 500)
 	BufferMs int
 
+	// StaticDelayMs shifts every scheduled play time forward by this many
+	// milliseconds. Used to compensate for hardware that introduces a fixed
+	// downstream latency (Bluetooth sinks, AVRs with DSP, some USB DACs).
+	// Default 0 means no shift.
+	StaticDelayMs int
+
 	DeviceInfo DeviceInfo
 
 	OnMetadata func(Metadata)
@@ -125,6 +131,7 @@ func (p *Player) Connect() error {
 		ServerAddr:     p.config.ServerAddr,
 		PlayerName:     p.config.PlayerName,
 		BufferMs:       p.config.BufferMs,
+		StaticDelayMs:  p.config.StaticDelayMs,
 		DeviceInfo:     p.config.DeviceInfo,
 		DecoderFactory: p.config.DecoderFactory,
 		OnMetadata:     p.config.OnMetadata,

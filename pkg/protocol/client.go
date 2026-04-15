@@ -204,11 +204,6 @@ func (c *Client) handshake() error {
 		Payload: hello,
 	}
 
-	helloJSON, err := json.MarshalIndent(msg, "", "  ")
-	if err == nil {
-		log.Printf("Sending client/hello:\n%s", string(helloJSON))
-	}
-
 	if err := c.sendJSON(msg); err != nil {
 		return fmt.Errorf("failed to send client/hello: %w", err)
 	}
