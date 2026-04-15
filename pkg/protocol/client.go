@@ -43,6 +43,16 @@ type Config struct {
 	PlayerV1Support     PlayerV1Support
 	ArtworkV1Support    *ArtworkV1Support
 	VisualizerV1Support *VisualizerV1Support
+
+	// SupportedRoles overrides the auto-built role list in the client/hello
+	// message. When nil or empty, handshake() builds the list from the V1
+	// support fields above (player@v1 + metadata@v1 always, plus artwork@v1
+	// and visualizer@v1 when their support structs are set). Set this to
+	// advertise a specific subset — e.g. []string{"metadata@v1"} for a
+	// metadata-only client, or []string{"controller@v1"} for controller
+	// scenarios where advertising player@v1 would incorrectly activate
+	// the audio stream.
+	SupportedRoles []string
 }
 
 type Client struct {
@@ -78,6 +88,26 @@ type ArtworkChunk struct {
 }
 
 func NewClient(config Config) *Client {
+	return newClient(config)
+}
+
+// NewClientFromConn wraps an already-established websocket connection. Use
+// this for server-initiated scenarios: the caller has accepted an incoming
+// connection on a listening socket and now needs the library to run the
+// client-side protocol (handshake, message loop, channel routing) over it.
+//
+// Unlike NewClient+Connect, the returned client is NOT yet running — call
+// Start to perform the handshake and launch the read loop.
+//
+// The caller transfers ownership of conn to the client; Close will close it.
+func NewClientFromConn(config Config, conn *websocket.Conn) *Client {
+	c := newClient(config)
+	c.conn = conn
+	c.connected = true
+	return c
+}
+
+func newClient(config Config) *Client {
 	ctx, cancel := context.WithCancel(context.Background())
 
 	return &Client{
@@ -96,7 +126,9 @@ func NewClient(config Config) *Client {
 	}
 }
 
-// Connect establishes WebSocket connection and performs handshake
+// Connect dials the configured server, runs the handshake, and starts the
+// message read loop. Use NewClientFromConn + Start when you already have
+// an accepted connection (server-initiated scenarios).
 func (c *Client) Connect() error {
 	u := url.URL{Scheme: "ws", Host: c.config.ServerAddr, Path: "/sendspin"}
 	log.Printf("Connecting to %s", u.String())
@@ -111,6 +143,20 @@ func (c *Client) Connect() error {
 	c.connected = true
 	c.mu.Unlock()
 
+	return c.Start()
+}
+
+// Start runs the client/hello handshake and launches the background read
+// loop. The connection must already be set via NewClientFromConn or Connect.
+// Calling Start more than once on the same client is undefined.
+func (c *Client) Start() error {
+	c.mu.RLock()
+	conn := c.conn
+	c.mu.RUnlock()
+	if conn == nil {
+		return fmt.Errorf("no connection: use NewClientFromConn or Connect before Start")
+	}
+
 	conn.SetReadLimit(1 << 20) // 1MB
 
 	if err := c.handshake(); err != nil {
@@ -124,14 +170,7 @@ func (c *Client) Connect() error {
 }
 
 func (c *Client) handshake() error {
-	// Build versioned role list per spec
-	roles := []string{"player@v1", "metadata@v1"}
-	if c.config.ArtworkV1Support != nil {
-		roles = append(roles, "artwork@v1")
-	}
-	if c.config.VisualizerV1Support != nil {
-		roles = append(roles, "visualizer@v1")
-	}
+	roles := c.buildSupportedRoles()
 
 	hello := ClientHello{
 		ClientID:            c.config.ClientID,
@@ -195,6 +234,27 @@ func (c *Client) handshake() error {
 	}
 
 	return nil
+}
+
+// buildSupportedRoles returns the role list for the client/hello message.
+// An explicit Config.SupportedRoles wins when set, since the caller is
+// telling us exactly which roles to advertise (metadata-only, controller,
+// etc.). Otherwise we build the default list from the V1 support fields:
+// player@v1 and metadata@v1 are always advertised for backwards
+// compatibility, and artwork@v1 / visualizer@v1 join the list when their
+// support structs are set.
+func (c *Client) buildSupportedRoles() []string {
+	if len(c.config.SupportedRoles) > 0 {
+		return c.config.SupportedRoles
+	}
+	roles := []string{"player@v1", "metadata@v1"}
+	if c.config.ArtworkV1Support != nil {
+		roles = append(roles, "artwork@v1")
+	}
+	if c.config.VisualizerV1Support != nil {
+		roles = append(roles, "visualizer@v1")
+	}
+	return roles
 }
 
 func (c *Client) sendJSON(msg Message) error {
