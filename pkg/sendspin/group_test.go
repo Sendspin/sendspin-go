@@ -46,7 +46,7 @@ func TestGroup_FanOut(t *testing.T) {
 		chans[i] = ch
 	}
 
-	g.publish(ClientLeftEvent{Client: &ServerClient{id: "c-gone"}})
+	g.publish(ClientLeftEvent{ClientID: "c-gone", ClientName: "Gone Client"})
 
 	var wg sync.WaitGroup
 	for i, ch := range chans {
@@ -138,4 +138,72 @@ func TestGroup_IDReturnsConstructorValue(t *testing.T) {
 	if got := g.ID(); got != "my-group-id" {
 		t.Errorf("ID() = %q, want %q", got, "my-group-id")
 	}
+}
+
+// TestGroup_ConcurrentSubscribeClose spawns many Subscribe callers
+// against a concurrent Close and asserts that nothing panics and every
+// returned channel is either pre-closed or closes promptly. Guards the
+// lock discipline against future refactors that could regress the
+// Subscribe-vs-Close ordering.
+func TestGroup_ConcurrentSubscribeClose(t *testing.T) {
+	const subscribers = 50
+	g := NewGroup("race-bait")
+
+	var wg sync.WaitGroup
+	subsReady := make(chan struct{})
+
+	for i := 0; i < subscribers; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			<-subsReady
+			ch, unsub := g.Subscribe()
+			defer unsub()
+
+			// Drain until the channel closes. If Close races with our
+			// Subscribe we should either get a pre-closed channel
+			// immediately or see it close after Close completes.
+			deadline := time.After(500 * time.Millisecond)
+			for {
+				select {
+				case _, ok := <-ch:
+					if !ok {
+						return
+					}
+				case <-deadline:
+					t.Error("channel never closed")
+					return
+				}
+			}
+		}()
+	}
+
+	close(subsReady)
+	time.Sleep(5 * time.Millisecond) // let some Subscribes land
+	g.Close()
+
+	wg.Wait()
+}
+
+// TestGroup_ConcurrentPublishClose races publishes against a close and
+// asserts no panic. A send on a closed channel would surface as a panic
+// recovered by the test runner.
+func TestGroup_ConcurrentPublishClose(t *testing.T) {
+	g := NewGroup("race-bait")
+
+	// Pre-subscribe so there's a channel to fan out to.
+	_, unsub := g.Subscribe()
+	defer unsub()
+
+	done := make(chan struct{})
+	go func() {
+		for i := 0; i < 1000; i++ {
+			g.publish(ClientJoinedEvent{Client: &ServerClient{id: "flood"}})
+		}
+		close(done)
+	}()
+
+	time.Sleep(2 * time.Millisecond) // let some publishes land
+	g.Close()
+	<-done
 }

@@ -27,9 +27,14 @@ type ClientJoinedEvent struct {
 func (ClientJoinedEvent) isGroupEvent() {}
 
 // ClientLeftEvent fires when a client has disconnected and been removed
-// from a Group. Handlers should release any per-client resources on this.
+// from a Group. The event carries only the ID and name of the departed
+// client, not a pointer — by the time handlers see this event, the
+// underlying ServerClient may already be mid-teardown and its methods
+// are unsafe to call. Handlers that need per-client state must have
+// captured it earlier (e.g. on the matching ClientJoinedEvent).
 type ClientLeftEvent struct {
-	Client *ServerClient
+	ClientID   string
+	ClientName string
 }
 
 func (ClientLeftEvent) isGroupEvent() {}
@@ -80,10 +85,11 @@ func (g *Group) ID() string { return g.id }
 // channel (capacity 32). Calling unsubscribe closes the channel and
 // removes it from the fan-out list; calling it more than once is safe.
 //
-// The event bus fans out with non-blocking sends — if a subscriber's
-// buffer is full when an event is published, the event is dropped for
-// that subscriber and a warning is logged. Subscribers should drain
-// their channel promptly or accept that they may miss events.
+// After Close() has been called, Subscribe returns a pre-closed channel
+// and a no-op unsubscribe. A receive on the returned channel will yield
+// the zero value with ok == false — callers ranging over the channel
+// should treat this as "group has shut down" rather than "no events
+// yet."
 func (g *Group) Subscribe() (<-chan Event, func()) {
 	g.mu.Lock()
 	defer g.mu.Unlock()
@@ -98,6 +104,10 @@ func (g *Group) Subscribe() (<-chan Event, func()) {
 
 	id := g.nextSub
 	g.nextSub++
+	// Buffer size 32 is a heuristic: the bus carries low-rate control
+	// events (joins, leaves, state changes), not audio. Slow handlers
+	// drop events via the non-blocking publish path rather than stalling
+	// the publisher.
 	ch := make(chan Event, 32)
 	g.subs[id] = ch
 
@@ -115,14 +125,28 @@ func (g *Group) Subscribe() (<-chan Event, func()) {
 	return ch, unsubscribe
 }
 
-// publish fans an event out to every active subscriber. Sends are
-// non-blocking: if a subscriber's buffer is full, the event is dropped
-// and a warning is logged. publish is unexported — events are only
-// published by other code in package sendspin.
+// publish fans an event out to every active subscriber. This is the
+// top-level entry point used by code that does not already hold g.mu.
+// Sends are non-blocking: if a subscriber's buffer is full, the event
+// is dropped and a warning is logged.
 func (g *Group) publish(evt Event) {
 	g.mu.RLock()
 	defer g.mu.RUnlock()
+	g.publishLocked(evt)
+}
 
+// publishLocked fans an event out assuming the caller already holds
+// g.mu (either Lock or RLock). Use this from code that mutates g.subs
+// or g.clients and wants to publish under the same critical section
+// to preserve ordering. Sends are non-blocking for the same reason
+// publish is — slow subscribers drop events instead of stalling the
+// publisher.
+//
+// Note: when invoked under a write Lock (as addClient/removeClient do),
+// the non-blocking sends run while the writer lock is held. This is
+// bounded by the number of subscribers and each send is select-default,
+// so the critical section remains O(subscribers) with no blocking.
+func (g *Group) publishLocked(evt Event) {
 	if g.closed {
 		return
 	}
@@ -141,32 +165,34 @@ func (g *Group) publish(evt Event) {
 // no-op on the second call.
 func (g *Group) addClient(c *ServerClient) {
 	g.mu.Lock()
+	defer g.mu.Unlock()
+
 	if g.closed {
-		g.mu.Unlock()
 		return
 	}
 	if _, exists := g.clients[c.ID()]; exists {
-		g.mu.Unlock()
 		return
 	}
 	g.clients[c.ID()] = c
-	g.mu.Unlock()
 
-	g.publish(ClientJoinedEvent{Client: c})
+	g.publishLocked(ClientJoinedEvent{Client: c})
 }
 
 // removeClient detaches a ServerClient and publishes a ClientLeftEvent.
 // Idempotent — removing an unknown client is a no-op.
 func (g *Group) removeClient(c *ServerClient) {
 	g.mu.Lock()
+	defer g.mu.Unlock()
+
 	if _, exists := g.clients[c.ID()]; !exists {
-		g.mu.Unlock()
 		return
 	}
 	delete(g.clients, c.ID())
-	g.mu.Unlock()
 
-	g.publish(ClientLeftEvent{Client: c})
+	g.publishLocked(ClientLeftEvent{
+		ClientID:   c.ID(),
+		ClientName: c.Name(),
+	})
 }
 
 // Clients returns a snapshot of the ServerClients currently attached to
