@@ -29,6 +29,20 @@ func TestServerClient_Accessors(t *testing.T) {
 	}
 }
 
+// TestServerClient_RolesReturnsCopy guards the defensive-copy contract.
+// Mutating the returned slice must not affect a subsequent Roles() call.
+func TestServerClient_RolesReturnsCopy(t *testing.T) {
+	sc := &ServerClient{roles: []string{"player@v1", "metadata@v1"}}
+
+	first := sc.Roles()
+	first[0] = "tampered"
+
+	second := sc.Roles()
+	if second[0] != "player@v1" {
+		t.Errorf("Roles() returned aliased slice: got %q after mutation, want %q", second[0], "player@v1")
+	}
+}
+
 // TestServerClient_HasRole covers both exact matches and versioned matches
 // (e.g., "player" should match "player@v1"). This mirrors the existing
 // Server.hasRole behavior, which the accessor replaces.

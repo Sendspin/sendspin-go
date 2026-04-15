@@ -565,7 +565,11 @@ func (s *Server) handleTimeSync(c *ServerClient, payload interface{}) {
 		ServerTransmitted: serverSend,
 	}
 
-	c.Send("server/time", response)
+	if err := c.Send("server/time", response); err != nil {
+		if s.config.Debug {
+			log.Printf("Error sending server/time to %s: %v", c.name, err)
+		}
+	}
 }
 
 // handleClientState applies a client's player state update per spec.
@@ -663,7 +667,9 @@ func (s *Server) addClientToStream(c *ServerClient) {
 		},
 	}
 
-	c.Send("stream/start", streamStart)
+	if err := c.Send("stream/start", streamStart); err != nil {
+		log.Printf("Error sending stream/start to %s: %v", c.name, err)
+	}
 
 	// server/state carries the initial metadata snapshot per spec.
 	title, artist, album := s.audioSource.Metadata()
@@ -676,7 +682,9 @@ func (s *Server) addClientToStream(c *ServerClient) {
 		},
 	}
 
-	c.Send("server/state", serverState)
+	if err := c.Send("server/state", serverState); err != nil {
+		log.Printf("Error sending server/state to %s: %v", c.name, err)
+	}
 
 	// group/update is required by spec even when we host a single implicit group.
 	groupID := s.serverID
@@ -686,7 +694,9 @@ func (s *Server) addClientToStream(c *ServerClient) {
 		PlaybackState: &playbackState,
 	}
 
-	c.Send("group/update", groupUpdate)
+	if err := c.Send("group/update", groupUpdate); err != nil {
+		log.Printf("Error sending group/update to %s: %v", c.name, err)
+	}
 }
 
 func (s *Server) notifyStreamEnd() {
@@ -699,7 +709,9 @@ func (s *Server) notifyStreamEnd() {
 
 	for _, c := range s.clients {
 		if c.HasRole("player") {
-			c.Send("stream/end", streamEnd)
+			if err := c.Send("stream/end", streamEnd); err != nil {
+				log.Printf("Error sending stream/end to %s: %v", c.name, err)
+			}
 		}
 	}
 }

@@ -48,9 +48,13 @@ func (c *ServerClient) ID() string { return c.id }
 // Name returns the human-friendly name from client/hello.
 func (c *ServerClient) Name() string { return c.name }
 
-// Roles returns the client's advertised role list. The slice is shared
-// with the underlying ServerClient and must not be mutated by callers.
-func (c *ServerClient) Roles() []string { return c.roles }
+// Roles returns the client's advertised role list as a fresh slice.
+// Callers may mutate the returned slice without affecting the ServerClient.
+func (c *ServerClient) Roles() []string {
+	out := make([]string, len(c.roles))
+	copy(out, c.roles)
+	return out
+}
 
 // HasRole reports whether this client advertised a given role family.
 // It matches both exact ("player") and versioned ("player@v1") forms so
@@ -67,6 +71,11 @@ func (c *ServerClient) HasRole(role string) bool {
 // Send enqueues a typed control message for transmission. Returns an
 // error immediately if the client's send buffer is full rather than
 // blocking — callers decide whether to drop or disconnect.
+//
+// A nil return means the message was enqueued, not that it was delivered:
+// after the client's writer goroutine has exited (e.g., post-disconnect),
+// enqueued messages are dropped silently. Callers should treat this as
+// best-effort once they've observed a client leaving.
 func (c *ServerClient) Send(msgType string, payload interface{}) error {
 	msg := protocol.Message{
 		Type:    msgType,
@@ -82,6 +91,11 @@ func (c *ServerClient) Send(msgType string, payload interface{}) error {
 
 // SendBinary enqueues a raw binary frame (e.g., an audio chunk) for
 // transmission. Same non-blocking semantics as Send.
+//
+// A nil return means the frame was enqueued, not that it was delivered:
+// after the client's writer goroutine has exited (e.g., post-disconnect),
+// enqueued frames are dropped silently. Callers should treat this as
+// best-effort once they've observed a client leaving.
 func (c *ServerClient) SendBinary(data []byte) error {
 	select {
 	case c.sendChan <- data:
