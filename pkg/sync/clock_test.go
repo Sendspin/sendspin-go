@@ -68,7 +68,6 @@ func TestServerToLocalTimeConversion(t *testing.T) {
 	}
 }
 
-
 func TestQualityTracking(t *testing.T) {
 	cs := NewClockSync()
 

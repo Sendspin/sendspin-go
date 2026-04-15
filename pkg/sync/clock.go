@@ -116,4 +116,3 @@ func (cs *ClockSync) ServerMicrosNow() int64 {
 
 	return cs.filter.ComputeServerTime(time.Now().UnixMicro())
 }
-
