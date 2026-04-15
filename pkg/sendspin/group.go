@@ -20,6 +20,12 @@ type Event interface {
 // ClientJoinedEvent fires when a client has completed the handshake and
 // been added to a Group. Handlers that need to send a greeting message
 // or snapshot state to the new client should listen for this.
+//
+// Unlike ClientLeftEvent, this event carries a live *ServerClient
+// pointer because at publish time the client has just completed its
+// handshake and its connection is fully alive — handler calls like
+// c.Send(...) are safe. ClientLeftEvent intentionally drops the
+// pointer because by the time it fires, the client is mid-teardown.
 type ClientJoinedEvent struct {
 	Client *ServerClient
 }
@@ -43,6 +49,11 @@ func (ClientLeftEvent) isGroupEvent() {}
 // volume, muted) has been updated from a client/state control message.
 // The snapshot fields are captured at publish time; the Client pointer
 // is provided for handlers that need to reply.
+//
+// Handlers should treat the embedded State/Volume/Muted fields as the
+// authoritative value for this specific event; calling c.State() on
+// the Client pointer may return a newer value written by a subsequent
+// state update that raced this event's delivery.
 type ClientStateChangedEvent struct {
 	Client *ServerClient
 	State  string
@@ -55,6 +66,14 @@ func (ClientStateChangedEvent) isGroupEvent() {}
 // Group owns the event bus and the set of clients currently attached to
 // a playback group. For M2 there is exactly one Group per Server,
 // auto-created in NewServer. Multi-group support is a post-#61 concern.
+//
+// Event ordering: events originating from a single source (e.g., all
+// events from one client's read loop) are delivered to each subscriber
+// in publish order. Events from different sources have no relative
+// ordering guarantee — a handler that reacts to ClientJoinedEvent by
+// publishing another event does not race the client's own subsequent
+// events deterministically. M3 role handlers that need cross-source
+// ordering must coordinate via their own synchronization.
 //
 // The zero value is not usable — construct via NewGroup.
 type Group struct {
@@ -225,4 +244,5 @@ func (g *Group) Close() {
 		close(ch)
 		delete(g.subs, id)
 	}
+	clear(g.clients)
 }

@@ -377,14 +377,17 @@ func TestServerMultipleClients(t *testing.T) {
 	time.Sleep(100 * time.Millisecond)
 }
 
-// TestServer_DefaultGroupReceivesClientEvents confirms the end-to-end
-// wiring: a Server constructs a default Group in NewServer, and
-// subscribers to that group observe ClientJoinedEvent / ClientLeftEvent
-// when clients are added to or removed from the server's client map.
+// TestServer_DefaultGroupReceivesClientEvents confirms that a Server's
+// defaultGroup is constructed in NewServer, that Server.Group() returns
+// it, and that the addClient/removeClient helper path delivers
+// ClientJoinedEvent / ClientLeftEvent to subscribers.
 //
-// This is an integration guard — the individual pieces have unit tests,
-// but this catches cases where the wiring between Server and Group gets
-// accidentally severed.
+// NOTE: this test bypasses handleConnection's handshake and pokes the
+// internal client map directly. It does NOT guard that handleConnection
+// itself wires into the group correctly — a future refactor that moved
+// defaultGroup.addClient out of handleConnection would still pass this
+// test. A proper wiring guard would need a real WebSocket handshake;
+// leaving that for a follow-up.
 func TestServer_DefaultGroupReceivesClientEvents(t *testing.T) {
 	s, err := NewServer(ServerConfig{
 		Port:       0, // don't bind
