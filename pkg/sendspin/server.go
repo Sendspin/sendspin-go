@@ -62,8 +62,9 @@ type Server struct {
 	httpServer *http.Server
 	mux        *http.ServeMux
 
-	clients   map[string]*ServerClient
-	clientsMu sync.RWMutex
+	clients      map[string]*ServerClient
+	clientsMu    sync.RWMutex
+	defaultGroup *Group
 
 	clockStart time.Time // monotonic microseconds origin
 
@@ -120,6 +121,8 @@ func NewServer(config ServerConfig) (*Server, error) {
 		clockStart: time.Now(),
 		stopChan:   make(chan struct{}),
 	}
+
+	s.defaultGroup = NewGroup(s.serverID)
 
 	return s, nil
 }
@@ -231,6 +234,10 @@ func (s *Server) Start() error {
 		log.Printf("Error closing audio source: %v", err)
 	}
 
+	if s.defaultGroup != nil {
+		s.defaultGroup.Close()
+	}
+
 	s.wg.Wait()
 	log.Printf("Server stopped cleanly")
 
@@ -241,6 +248,13 @@ func (s *Server) Stop() {
 	s.stopOnce.Do(func() {
 		close(s.stopChan)
 	})
+}
+
+// Group returns the server's default playback group. For M2 there is
+// exactly one implicit group per Server; the accessor exists so future
+// GroupRole implementations (M3) can subscribe to its event bus.
+func (s *Server) Group() *Group {
+	return s.defaultGroup
 }
 
 func (s *Server) Clients() []ClientInfo {
@@ -347,6 +361,8 @@ func (s *Server) handleConnection(conn *websocket.Conn) {
 	s.clients[c.id] = c
 	s.clientsMu.Unlock()
 
+	s.defaultGroup.addClient(c)
+
 	defer func() {
 		s.removeClient(c)
 		log.Printf("Client disconnected: %s", c.name)
@@ -427,9 +443,6 @@ func (s *Server) clientWriter(c *ServerClient) {
 }
 
 func (s *Server) removeClient(c *ServerClient) {
-	s.clientsMu.Lock()
-	defer s.clientsMu.Unlock()
-
 	c.mu.Lock()
 	if c.opusEncoder != nil {
 		c.opusEncoder.Close()
@@ -438,7 +451,12 @@ func (s *Server) removeClient(c *ServerClient) {
 	c.resampler = nil
 	c.mu.Unlock()
 
+	s.clientsMu.Lock()
 	delete(s.clients, c.id)
+	s.clientsMu.Unlock()
+
+	s.defaultGroup.removeClient(c)
+
 	close(c.done)
 }
 

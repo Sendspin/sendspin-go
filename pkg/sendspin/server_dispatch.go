@@ -80,6 +80,13 @@ func (s *Server) handleClientState(c *ServerClient, payload interface{}) {
 		if s.config.Debug {
 			log.Printf("Client %s state: %s (vol: %d, muted: %v)", c.name, stateMsg.Player.State, stateMsg.Player.Volume, stateMsg.Player.Muted)
 		}
+
+		s.defaultGroup.publish(ClientStateChangedEvent{
+			Client: c,
+			State:  stateMsg.Player.State,
+			Volume: stateMsg.Player.Volume,
+			Muted:  stateMsg.Player.Muted,
+		})
 	}
 }
 
