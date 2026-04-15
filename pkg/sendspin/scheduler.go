@@ -20,6 +20,7 @@ type Scheduler struct {
 	bufferMu     gosync.Mutex // Protects bufferQ and buffering
 	output       chan audio.Buffer
 	jitterMs     int
+	staticDelay  time.Duration // shifts scheduled play time forward to compensate for hardware latency
 	ctx          context.Context
 	cancel       context.CancelFunc
 	buffering    bool
@@ -36,9 +37,11 @@ type SchedulerStats struct {
 	Dropped  int64
 }
 
-// NewScheduler creates a playback scheduler
-// bufferMs controls startup buffering: how many ms of audio to accumulate before playback
-func NewScheduler(clockSync *sync.ClockSync, bufferMs int) *Scheduler {
+// NewScheduler creates a playback scheduler.
+// bufferMs controls startup buffering (ms of audio to accumulate before playback).
+// staticDelayMs shifts every scheduled play time forward, compensating for
+// downstream hardware latency like Bluetooth sinks or AVRs. Zero means no shift.
+func NewScheduler(clockSync *sync.ClockSync, bufferMs int, staticDelayMs int) *Scheduler {
 	ctx, cancel := context.WithCancel(context.Background())
 
 	// Calculate buffer target from user config (bufferMs / ChunkDurationMs)
@@ -52,6 +55,7 @@ func NewScheduler(clockSync *sync.ClockSync, bufferMs int) *Scheduler {
 		bufferQ:      NewBufferQueue(),
 		output:       make(chan audio.Buffer, 10),
 		jitterMs:     bufferMs, // Store for potential future use
+		staticDelay:  time.Duration(staticDelayMs) * time.Millisecond,
 		ctx:          ctx,
 		cancel:       cancel,
 		buffering:    true,
@@ -60,7 +64,7 @@ func NewScheduler(clockSync *sync.ClockSync, bufferMs int) *Scheduler {
 }
 
 func (s *Scheduler) Schedule(buf audio.Buffer) {
-	buf.PlayAt = s.clockSync.ServerToLocalTime(buf.Timestamp)
+	buf.PlayAt = s.clockSync.ServerToLocalTime(buf.Timestamp).Add(s.staticDelay)
 
 	received := s.received.Add(1) - 1
 

@@ -21,13 +21,16 @@ import (
 )
 
 var (
-	serverAddr = flag.String("server", "", "Manual server address (skip mDNS)")
-	port       = flag.Int("port", 8927, "Port for mDNS advertisement")
-	name       = flag.String("name", "", "Player friendly name (default: hostname-sendspin-player)")
-	bufferMs   = flag.Int("buffer-ms", 150, "Jitter buffer size in milliseconds")
-	logFile    = flag.String("log-file", "sendspin-player.log", "Log file path")
-	noTUI      = flag.Bool("no-tui", false, "Disable TUI, use streaming logs instead")
-	streamLogs = flag.Bool("stream-logs", false, "Alias for -no-tui")
+	serverAddr    = flag.String("server", "", "Manual server address (skip mDNS)")
+	port          = flag.Int("port", 8927, "Port for mDNS advertisement")
+	name          = flag.String("name", "", "Player friendly name (default: hostname-sendspin-player)")
+	bufferMs      = flag.Int("buffer-ms", 150, "Jitter buffer size in milliseconds")
+	staticDelayMs = flag.Int("static-delay-ms", 0, "Static playback delay in milliseconds for hardware latency compensation")
+	logFile       = flag.String("log-file", "sendspin-player.log", "Log file path")
+	noTUI         = flag.Bool("no-tui", false, "Disable TUI, use streaming logs instead")
+	streamLogs    = flag.Bool("stream-logs", false, "Alias for -no-tui")
+	productName   = flag.String("product-name", "", "Override the product name sent in device_info (default: compiled-in identity)")
+	manufacturer  = flag.String("manufacturer", "", "Override the manufacturer sent in device_info (default: compiled-in identity)")
 )
 
 func main() {
@@ -108,14 +111,24 @@ func main() {
 		serverAddress = *serverAddr
 	}
 
+	deviceProduct := version.Product
+	if *productName != "" {
+		deviceProduct = *productName
+	}
+	deviceManufacturer := version.Manufacturer
+	if *manufacturer != "" {
+		deviceManufacturer = *manufacturer
+	}
+
 	config := sendspin.PlayerConfig{
-		ServerAddr: serverAddress,
-		PlayerName: playerName,
-		Volume:     100,
-		BufferMs:   *bufferMs,
+		ServerAddr:    serverAddress,
+		PlayerName:    playerName,
+		Volume:        100,
+		BufferMs:      *bufferMs,
+		StaticDelayMs: *staticDelayMs,
 		DeviceInfo: sendspin.DeviceInfo{
-			ProductName:     version.Product,
-			Manufacturer:    version.Manufacturer,
+			ProductName:     deviceProduct,
+			Manufacturer:    deviceManufacturer,
 			SoftwareVersion: version.Version,
 		},
 		OnStateChange: func(state sendspin.PlayerState) {
