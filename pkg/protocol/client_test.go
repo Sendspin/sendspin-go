@@ -496,3 +496,169 @@ func TestClientSend_WritesEnvelope(t *testing.T) {
 		t.Fatal("server never captured a client/command")
 	}
 }
+
+// TestHandshake_PlayerSupportGatedByRoles is a regression test for a real
+// bug caught by the conformance harness against aiosendspin. The Go
+// library used to emit player@v1_support in every client/hello regardless
+// of the advertised role list. aiosendspin's schema marks
+// ClientHelloPlayerSupport.supported_formats as non-nullable, so a zero-
+// value Go PlayerV1Support (whose nil slice encodes as JSON null) caused
+// aiosendspin's mashumaro deserializer to reject the entire hello and
+// close the connection with code 1000. sendspin-go then reported
+// "handshake failed: failed to read server/hello: websocket: close 1000".
+//
+// The fix: only set hello.PlayerV1Support when player@v1 is in the
+// final advertised role list. This mirrors how ArtworkV1Support and
+// VisualizerV1Support were already being handled (only set when
+// non-nil in config), and aligns with aiosendspin's own validation
+// comment: "player@v1_support must be provided when 'player@v1' is in
+// supported_roles".
+//
+// The test captures the raw hello bytes on the wire and asserts the
+// top-level payload key is absent for non-player roles, and present
+// for player@v1 (the default).
+func TestHandshake_PlayerSupportGatedByRoles(t *testing.T) {
+	// playerSupport is populated for the "advertised player" cases so the
+	// emitted player@v1_support block is a well-formed one — matches what
+	// a real caller would pass — and the secondary null-check assertion
+	// below is meaningful rather than a false positive.
+	playerSupport := PlayerV1Support{
+		SupportedFormats: []AudioFormat{
+			{Codec: "pcm", Channels: 2, SampleRate: 48000, BitDepth: 16},
+		},
+		BufferCapacity:    1_000_000,
+		SupportedCommands: []string{"volume", "mute"},
+	}
+
+	cases := []struct {
+		name            string
+		supportedRoles  []string
+		playerV1Support PlayerV1Support
+		wantPlayerKey   bool
+	}{
+		{
+			name:           "controller only omits player support",
+			supportedRoles: []string{"controller@v1"},
+			wantPlayerKey:  false,
+		},
+		{
+			name:           "metadata only omits player support",
+			supportedRoles: []string{"metadata@v1"},
+			wantPlayerKey:  false,
+		},
+		{
+			name:           "artwork only omits player support",
+			supportedRoles: []string{"artwork@v1"},
+			wantPlayerKey:  false,
+		},
+		{
+			name:            "player advertised keeps player support",
+			supportedRoles:  []string{"player@v1"},
+			playerV1Support: playerSupport,
+			wantPlayerKey:   true,
+		},
+		{
+			name:            "player plus other roles keeps player support",
+			supportedRoles:  []string{"player@v1", "controller@v1"},
+			playerV1Support: playerSupport,
+			wantPlayerKey:   true,
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			capturedHello := make(chan []byte, 1)
+
+			upgrader := websocket.Upgrader{CheckOrigin: func(*http.Request) bool { return true }}
+			handler := func(w http.ResponseWriter, r *http.Request) {
+				conn, err := upgrader.Upgrade(w, r, nil)
+				if err != nil {
+					t.Errorf("upgrade: %v", err)
+					return
+				}
+				defer conn.Close()
+
+				_, helloBytes, err := conn.ReadMessage()
+				if err != nil {
+					t.Errorf("read client/hello: %v", err)
+					return
+				}
+				// Copy the slice; gorilla reuses its underlying buffer.
+				snapshot := make([]byte, len(helloBytes))
+				copy(snapshot, helloBytes)
+				capturedHello <- snapshot
+
+				// Drive the rest of the handshake so the client goroutine
+				// doesn't error out on a hard close mid-stream.
+				_ = conn.WriteJSON(Message{
+					Type:    "server/hello",
+					Payload: ServerHello{ServerID: "srv", Name: "srv", Version: 1},
+				})
+				_, _, _ = conn.ReadMessage() // client/state
+				time.Sleep(20 * time.Millisecond)
+			}
+
+			server := httptest.NewServer(http.HandlerFunc(handler))
+			defer server.Close()
+
+			wsURL := "ws" + strings.TrimPrefix(server.URL, "http")
+			conn, _, err := websocket.DefaultDialer.Dial(wsURL, nil)
+			if err != nil {
+				t.Fatalf("dial: %v", err)
+			}
+
+			client := NewClientFromConn(Config{
+				ClientID:        "test",
+				Name:            "Test",
+				Version:         1,
+				SupportedRoles:  tc.supportedRoles,
+				PlayerV1Support: tc.playerV1Support,
+			}, conn)
+			defer client.Close()
+
+			if err := client.Start(); err != nil {
+				t.Fatalf("Start: %v", err)
+			}
+
+			var helloBytes []byte
+			select {
+			case helloBytes = <-capturedHello:
+			case <-time.After(2 * time.Second):
+				t.Fatal("server never captured a client/hello")
+			}
+
+			var envelope map[string]any
+			if err := json.Unmarshal(helloBytes, &envelope); err != nil {
+				t.Fatalf("unmarshal envelope: %v", err)
+			}
+			payload, ok := envelope["payload"].(map[string]any)
+			if !ok {
+				t.Fatalf("envelope.payload is not a map: %v", envelope["payload"])
+			}
+
+			_, havePlayerKey := payload["player@v1_support"]
+			if havePlayerKey != tc.wantPlayerKey {
+				if tc.wantPlayerKey {
+					t.Errorf("client/hello missing player@v1_support when player@v1 is advertised:\n%s", helloBytes)
+				} else {
+					t.Errorf("client/hello includes player@v1_support when player@v1 is NOT advertised (%v):\n%s",
+						tc.supportedRoles, helloBytes)
+				}
+			}
+
+			// When PlayerSupport is emitted and its supported_formats is nil,
+			// the JSON encoder produces null. Catch that too — a nil-slice
+			// null would still fail against aiosendspin's schema even if
+			// we correctly gated on roles.
+			if havePlayerKey {
+				playerSupport, ok := payload["player@v1_support"].(map[string]any)
+				if !ok {
+					t.Fatalf("player@v1_support is not a map: %v", payload["player@v1_support"])
+				}
+				if playerSupport["supported_formats"] == nil {
+					t.Error("player@v1_support.supported_formats serialized as null; aiosendspin's schema rejects this")
+				}
+			}
+		})
+	}
+}
