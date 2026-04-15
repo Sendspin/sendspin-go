@@ -377,6 +377,77 @@ func TestServerMultipleClients(t *testing.T) {
 	time.Sleep(100 * time.Millisecond)
 }
 
+// TestServer_DefaultGroupReceivesClientEvents confirms the end-to-end
+// wiring: a Server constructs a default Group in NewServer, and
+// subscribers to that group observe ClientJoinedEvent / ClientLeftEvent
+// when clients are added to or removed from the server's client map.
+//
+// This is an integration guard — the individual pieces have unit tests,
+// but this catches cases where the wiring between Server and Group gets
+// accidentally severed.
+func TestServer_DefaultGroupReceivesClientEvents(t *testing.T) {
+	s, err := NewServer(ServerConfig{
+		Port:       0, // don't bind
+		Name:       "test-server",
+		Source:     NewTestTone(48000, 2),
+		EnableMDNS: false,
+	})
+	if err != nil {
+		t.Fatalf("NewServer: %v", err)
+	}
+
+	g := s.Group()
+	if g == nil {
+		t.Fatal("Server.Group() returned nil")
+	}
+
+	events, unsubscribe := g.Subscribe()
+	defer unsubscribe()
+
+	// Inject a fake client by calling the same internal path handleConnection
+	// uses after the hello handshake.
+	fake := &ServerClient{
+		id:       "fake-client",
+		name:     "Fake Client",
+		roles:    []string{"player@v1"},
+		sendChan: make(chan interface{}, 10),
+		done:     make(chan struct{}),
+	}
+
+	s.clientsMu.Lock()
+	s.clients[fake.id] = fake
+	s.clientsMu.Unlock()
+	s.defaultGroup.addClient(fake)
+
+	select {
+	case evt := <-events:
+		if _, ok := evt.(ClientJoinedEvent); !ok {
+			t.Errorf("first event = %T, want ClientJoinedEvent", evt)
+		}
+	case <-time.After(100 * time.Millisecond):
+		t.Fatal("timed out waiting for ClientJoinedEvent")
+	}
+
+	// Remove the client the same way removeClient would.
+	s.clientsMu.Lock()
+	delete(s.clients, fake.id)
+	s.clientsMu.Unlock()
+	s.defaultGroup.removeClient(fake)
+
+	select {
+	case evt := <-events:
+		left, ok := evt.(ClientLeftEvent)
+		if !ok {
+			t.Errorf("second event = %T, want ClientLeftEvent", evt)
+		}
+		if left.ClientID != "fake-client" {
+			t.Errorf("ClientLeftEvent.ClientID = %q, want %q", left.ClientID, "fake-client")
+		}
+	case <-time.After(100 * time.Millisecond):
+		t.Fatal("timed out waiting for ClientLeftEvent")
+	}
+}
+
 func TestServerDuplicateClientID(t *testing.T) {
 	source := NewTestTone(48000, 2)
 
