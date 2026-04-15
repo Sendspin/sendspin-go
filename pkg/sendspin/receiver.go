@@ -101,6 +101,13 @@ func (r *Receiver) ClockSync() *sync.ClockSync {
 	return r.clockSync
 }
 
+// Done returns a channel that is closed when the receiver's context is
+// cancelled — either by Close() or by watchConnection detecting a dropped
+// protocol client. Callers can use this to implement reconnect loops.
+func (r *Receiver) Done() <-chan struct{} {
+	return r.ctx.Done()
+}
+
 // Stats returns current pipeline statistics from the scheduler and clock sync.
 func (r *Receiver) Stats() ReceiverStats {
 	stats := ReceiverStats{}
