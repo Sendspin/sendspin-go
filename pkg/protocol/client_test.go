@@ -3,6 +3,7 @@
 package protocol
 
 import (
+	"bytes"
 	"encoding/binary"
 	"encoding/json"
 	"net/http"
@@ -333,6 +334,43 @@ func TestNewClientFromConn_HandshakeAndClose(t *testing.T) {
 	case <-time.After(2 * time.Second):
 		t.Fatal("server never captured a client/hello")
 	}
+
+	// ServerHello() and RawServerHello() must return the handshake data
+	// after Start() completes. The test server above responds with a hello
+	// whose ServerID is "test-server" and Name is "Test Server", so both
+	// accessors should agree.
+	parsed := client.ServerHello()
+	if parsed == nil {
+		t.Fatal("ServerHello() returned nil after successful handshake")
+	}
+	if parsed.ServerID != "test-server" {
+		t.Errorf("ServerHello().ServerID = %q, want test-server", parsed.ServerID)
+	}
+	if parsed.Name != "Test Server" {
+		t.Errorf("ServerHello().Name = %q, want Test Server", parsed.Name)
+	}
+
+	raw := client.RawServerHello()
+	if len(raw) == 0 {
+		t.Fatal("RawServerHello() returned empty bytes after successful handshake")
+	}
+	var envelope map[string]any
+	if err := json.Unmarshal(raw, &envelope); err != nil {
+		t.Fatalf("RawServerHello() did not return valid JSON: %v", err)
+	}
+	if envelope["type"] != "server/hello" {
+		t.Errorf("raw envelope type = %v, want server/hello", envelope["type"])
+	}
+
+	// Confirm RawServerHello returns a copy: mutating the returned slice
+	// must not affect subsequent calls.
+	if len(raw) > 0 {
+		raw[0] = 0xFF
+	}
+	raw2 := client.RawServerHello()
+	if bytes.Equal(raw, raw2) {
+		t.Error("RawServerHello returned a shared reference; mutation leaked into the client")
+	}
 }
 
 // TestStart_NoConnection confirms Start refuses to run without a connection
@@ -345,5 +383,116 @@ func TestStart_NoConnection(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "no connection") {
 		t.Errorf("error message = %q, want substring %q", err.Error(), "no connection")
+	}
+}
+
+// TestServerHello_BeforeHandshake guards against nil confusion: the
+// accessors must return nil/empty before Start() runs, not stale data
+// from a previous client or a zero-value ServerHello.
+func TestServerHello_BeforeHandshake(t *testing.T) {
+	client := NewClient(Config{ServerAddr: "localhost:0", ClientID: "t", Name: "t"})
+
+	if hello := client.ServerHello(); hello != nil {
+		t.Errorf("ServerHello() before handshake = %+v, want nil", hello)
+	}
+	if raw := client.RawServerHello(); raw != nil {
+		t.Errorf("RawServerHello() before handshake = %v, want nil", raw)
+	}
+}
+
+// TestClientSend_WritesEnvelope verifies that Client.Send emits a correctly
+// shaped {"type": ..., "payload": ...} envelope on the wire. The test
+// server reads a client/command message after handshake and asserts on the
+// envelope shape, which is exactly what the conformance adapter's
+// controller scenarios need.
+func TestClientSend_WritesEnvelope(t *testing.T) {
+	capturedCommand := make(chan map[string]any, 1)
+
+	upgrader := websocket.Upgrader{CheckOrigin: func(*http.Request) bool { return true }}
+	handler := func(w http.ResponseWriter, r *http.Request) {
+		conn, err := upgrader.Upgrade(w, r, nil)
+		if err != nil {
+			t.Errorf("upgrade: %v", err)
+			return
+		}
+		defer conn.Close()
+
+		// Handshake: read client/hello, write server/hello, read client/state.
+		if _, _, err := conn.ReadMessage(); err != nil {
+			t.Errorf("read client/hello: %v", err)
+			return
+		}
+		if err := conn.WriteJSON(Message{
+			Type:    "server/hello",
+			Payload: ServerHello{ServerID: "srv", Name: "srv", Version: 1},
+		}); err != nil {
+			t.Errorf("write server/hello: %v", err)
+			return
+		}
+		if _, _, err := conn.ReadMessage(); err != nil {
+			t.Errorf("read client/state: %v", err)
+			return
+		}
+
+		// Now read the client/command the test below will send via Send().
+		_, cmdBytes, err := conn.ReadMessage()
+		if err != nil {
+			t.Errorf("read client/command: %v", err)
+			return
+		}
+		var envelope map[string]any
+		if err := json.Unmarshal(cmdBytes, &envelope); err != nil {
+			t.Errorf("unmarshal envelope: %v", err)
+			return
+		}
+		capturedCommand <- envelope
+
+		time.Sleep(20 * time.Millisecond)
+	}
+
+	server := httptest.NewServer(http.HandlerFunc(handler))
+	defer server.Close()
+
+	wsURL := "ws" + strings.TrimPrefix(server.URL, "http")
+	conn, _, err := websocket.DefaultDialer.Dial(wsURL, nil)
+	if err != nil {
+		t.Fatalf("dial: %v", err)
+	}
+
+	client := NewClientFromConn(Config{
+		ClientID:       "sender",
+		Name:           "Sender Test",
+		Version:        1,
+		SupportedRoles: []string{"controller@v1"},
+	}, conn)
+	defer client.Close()
+
+	if err := client.Start(); err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+
+	payload := map[string]any{"controller": map[string]any{"command": "next"}}
+	if err := client.Send("client/command", payload); err != nil {
+		t.Fatalf("Send: %v", err)
+	}
+
+	select {
+	case envelope := <-capturedCommand:
+		if envelope["type"] != "client/command" {
+			t.Errorf("envelope.type = %v, want client/command", envelope["type"])
+		}
+		innerPayload, ok := envelope["payload"].(map[string]any)
+		if !ok {
+			t.Fatalf("envelope.payload not a map: %v", envelope["payload"])
+		}
+		controller, ok := innerPayload["controller"].(map[string]any)
+		if !ok {
+			t.Fatalf("payload.controller not a map: %v", innerPayload["controller"])
+		}
+		if controller["command"] != "next" {
+			t.Errorf("controller.command = %v, want next", controller["command"])
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("server never captured a client/command")
 	}
 }
