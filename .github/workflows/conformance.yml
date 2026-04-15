@@ -1,0 +1,89 @@
+# ABOUTME: Runs the Sendspin protocol conformance suite against this PR
+# ABOUTME: Pins sendspin-go to the PR checkout via CONFORMANCE_REPO_SENDSPIN_GO env var
+name: Conformance
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+  workflow_dispatch:
+
+concurrency:
+  group: conformance-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  conformance:
+    name: Protocol conformance
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - name: Checkout sendspin-go
+        uses: actions/checkout@v4
+        with:
+          path: sendspin-go
+
+      - name: Checkout conformance harness
+        uses: actions/checkout@v4
+        with:
+          repository: Sendspin/conformance
+          path: conformance
+          ref: main
+
+      - name: Clone aiosendspin (reference peer)
+        run: |
+          git clone --depth 1 https://github.com/Sendspin/aiosendspin.git \
+            conformance/repos/aiosendspin
+
+      - name: Clone sendspin-cli (supplies the FLAC test fixture)
+        run: |
+          git clone --depth 1 https://github.com/Sendspin/sendspin-cli.git \
+            conformance/repos/sendspin-cli
+
+      - name: Pin sendspin-go adapter at the PR checkout
+        run: |
+          mkdir -p conformance/repos
+          ln -sfn ${{ github.workspace }}/sendspin-go conformance/repos/sendspin-go
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.24'
+
+      - name: Set up uv
+        uses: astral-sh/setup-uv@v3
+        with:
+          python-version: '3.12'
+
+      - name: Install harness dependencies
+        working-directory: conformance
+        run: uv sync
+
+      - name: Run conformance scenarios
+        working-directory: conformance
+        env:
+          CONFORMANCE_REPO_SENDSPIN_GO: ${{ github.workspace }}/sendspin-go
+        run: |
+          uv run python scripts/run_all.py \
+            --from sendspin-go \
+            --to aiosendspin,sendspin-go \
+            --results-dir results/ \
+            --environment-id sendspin-go-ci \
+            --environment-name "sendspin-go CI (${{ github.ref_name }})"
+
+      - name: Detect regressions against published baseline
+        working-directory: conformance
+        run: |
+          uv run python scripts/detect_regressions.py \
+            --results-dir results/ \
+            --github-summary
+
+      - name: Upload conformance report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: conformance-report
+          path: conformance/results/
+          retention-days: 30

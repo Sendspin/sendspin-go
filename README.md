@@ -386,6 +386,20 @@ Install to GOPATH/bin:
 make install
 ```
 
+### Protocol conformance
+
+The [Sendspin protocol conformance suite](https://github.com/Sendspin/conformance) runs real network scenarios between adapter binaries and compares outputs against canonical hashes. sendspin-go has a first-class adapter and is tested on every PR via the `Conformance` GitHub Actions workflow.
+
+Run the same suite locally:
+
+```bash
+make conformance
+```
+
+This clones `Sendspin/conformance` into `../conformance` (sibling directory) and the `aiosendspin` reference peer on first run, installs the harness with `uv`, and runs `scripts/run_all.py` with this checkout pinned via the `CONFORMANCE_REPO_SENDSPIN_GO` environment variable. Requires [uv](https://docs.astral.sh/uv/getting-started/installation/) and Python 3.12+.
+
+The published conformance report for the `main` branch is at https://sendspin.github.io/conformance/.
+
 ## Contributing
 
 Found a bug or have a feature request? Please check existing issues or create a new one:

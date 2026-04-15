@@ -2,7 +2,7 @@
 # ABOUTME: Provides targets for building, testing, and cleaning binaries
 
 .PHONY: all build player server test test-verbose test-coverage lint clean install \
-	build-all build-linux build-darwin help
+	build-all build-linux build-darwin help conformance
 
 # Version from git tag or default
 VERSION ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo "dev")
@@ -81,6 +81,39 @@ build-darwin:
 	GOOS=darwin GOARCH=amd64 go build -ldflags "$(LDFLAGS)" -o bin/sendspin-server-darwin-amd64 ./cmd/sendspin-server
 	GOOS=darwin GOARCH=arm64 go build -ldflags "$(LDFLAGS)" -o bin/sendspin-server-darwin-arm64 ./cmd/sendspin-server
 
+# Conformance test suite — runs the Sendspin protocol conformance harness
+# against the local sendspin-go checkout. Mirrors what CI does so contributors
+# and conformance maintainers can reproduce CI results locally.
+#
+# Assumes the conformance repo is checked out at ../conformance. Clones it
+# (and the aiosendspin reference peer) on first run. The CONFORMANCE_REPO_SENDSPIN_GO
+# env var points the harness at this checkout instead of the managed clone.
+conformance:
+	@command -v uv >/dev/null 2>&1 || { echo "uv is required: https://docs.astral.sh/uv/getting-started/installation/"; exit 1; }
+	@command -v git >/dev/null 2>&1 || { echo "git is required"; exit 1; }
+	@if [ ! -d ../conformance ]; then \
+		echo "Cloning Sendspin/conformance into ../conformance..."; \
+		git clone --depth 1 https://github.com/Sendspin/conformance.git ../conformance; \
+	fi
+	@mkdir -p ../conformance/repos
+	@if [ ! -e ../conformance/repos/aiosendspin ]; then \
+		echo "Cloning aiosendspin reference peer..."; \
+		git clone --depth 1 https://github.com/Sendspin/aiosendspin.git ../conformance/repos/aiosendspin; \
+	fi
+	@if [ ! -e ../conformance/repos/sendspin-cli ]; then \
+		echo "Cloning sendspin-cli (supplies the FLAC test fixture)..."; \
+		git clone --depth 1 https://github.com/Sendspin/sendspin-cli.git ../conformance/repos/sendspin-cli; \
+	fi
+	@ln -sfn "$(CURDIR)" ../conformance/repos/sendspin-go
+	@cd ../conformance && uv sync
+	@cd ../conformance && CONFORMANCE_REPO_SENDSPIN_GO="$(CURDIR)" uv run python scripts/run_all.py \
+		--from sendspin-go \
+		--to aiosendspin,sendspin-go \
+		--results-dir results/
+	@echo ""
+	@echo "Conformance report: $(CURDIR)/../conformance/results/index.html"
+	@echo "Raw results:        $(CURDIR)/../conformance/results/data/"
+
 # Show help
 help:
 	@echo "Sendspin Protocol - Build Targets"
@@ -97,5 +130,6 @@ help:
 	@echo "  make build-all    - Build all platforms"
 	@echo "  make build-linux  - Build Linux binaries"
 	@echo "  make build-darwin - Build macOS binaries"
+	@echo "  make conformance  - Run protocol conformance suite (clones ../conformance on first run)"
 	@echo ""
 	@echo "Version: $(VERSION)"
