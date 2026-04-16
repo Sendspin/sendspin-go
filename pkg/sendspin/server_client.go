@@ -36,6 +36,7 @@ type ServerClient struct {
 
 	codec       string
 	opusEncoder *server.OpusEncoder
+	flacEncoder *server.FLACEncoder
 	resampler   *audio.Resampler // non-nil only when source rate != 48kHz
 
 	sendChan chan interface{}

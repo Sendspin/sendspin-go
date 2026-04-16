@@ -480,6 +480,10 @@ func (s *Server) removeClient(c *ServerClient) {
 		c.opusEncoder.Close()
 		c.opusEncoder = nil
 	}
+	if c.flacEncoder != nil {
+		c.flacEncoder.Close()
+		c.flacEncoder = nil
+	}
 	c.resampler = nil
 	c.mu.Unlock()
 
