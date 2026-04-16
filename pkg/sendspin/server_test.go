@@ -558,6 +558,96 @@ func TestServer_ControllerCommandEndToEnd(t *testing.T) {
 	}
 }
 
+// TestServer_ActivateRolesDefaultsToPlayerMetadata confirms backward
+// compat: when ServerConfig.SupportedRoles is nil, activateRoles still
+// accepts "player" and "metadata" and rejects unknown families.
+func TestServer_ActivateRolesDefault(t *testing.T) {
+	s, err := NewServer(ServerConfig{
+		Port:   0,
+		Name:   "test",
+		Source: NewTestTone(48000, 2),
+	})
+	if err != nil {
+		t.Fatalf("NewServer: %v", err)
+	}
+
+	got := s.activateRoles([]string{"player@v1", "metadata@v1", "controller@v1", "artwork@v1"})
+
+	want := map[string]bool{"player@v1": true, "metadata@v1": true}
+	gotSet := make(map[string]bool)
+	for _, r := range got {
+		gotSet[r] = true
+	}
+	if len(gotSet) != len(want) {
+		t.Errorf("activateRoles default = %v, want player+metadata only", got)
+	}
+	for r := range want {
+		if !gotSet[r] {
+			t.Errorf("missing expected role %s in %v", r, got)
+		}
+	}
+}
+
+// TestServer_ActivateRolesFromConfig confirms that explicitly listing
+// roles in ServerConfig.SupportedRoles controls what gets activated.
+func TestServer_ActivateRolesFromConfig(t *testing.T) {
+	s, err := NewServer(ServerConfig{
+		Port:           0,
+		Name:           "test",
+		Source:         NewTestTone(48000, 2),
+		SupportedRoles: []string{"player", "artwork"},
+	})
+	if err != nil {
+		t.Fatalf("NewServer: %v", err)
+	}
+
+	got := s.activateRoles([]string{"player@v1", "metadata@v1", "artwork@v1"})
+
+	gotSet := make(map[string]bool)
+	for _, r := range got {
+		gotSet[r] = true
+	}
+	if gotSet["metadata@v1"] {
+		t.Error("metadata should NOT be active when not in SupportedRoles")
+	}
+	if !gotSet["player@v1"] || !gotSet["artwork@v1"] {
+		t.Errorf("expected player+artwork, got %v", got)
+	}
+}
+
+// TestServer_ActivateRolesFromGroupRegistry confirms that registering a
+// GroupRole on the server's Group auto-activates that role family even
+// when it's not in ServerConfig.SupportedRoles.
+func TestServer_ActivateRolesFromGroupRegistry(t *testing.T) {
+	s, err := NewServer(ServerConfig{
+		Port:   0,
+		Name:   "test",
+		Source: NewTestTone(48000, 2),
+	})
+	if err != nil {
+		t.Fatalf("NewServer: %v", err)
+	}
+
+	// Register a controller role — should auto-activate "controller".
+	ctrl := NewControllerRole(ControllerConfig{
+		SupportedCommands: []string{"next"},
+	})
+	s.Group().RegisterRole(ctrl)
+
+	got := s.activateRoles([]string{"player@v1", "controller@v1"})
+
+	gotSet := make(map[string]bool)
+	for _, r := range got {
+		gotSet[r] = true
+	}
+	if !gotSet["player@v1"] {
+		t.Error("player should be active (default)")
+	}
+	if !gotSet["controller@v1"] {
+		t.Error("controller should be active (registered via GroupRole)")
+	}
+}
+
 func TestServerDuplicateClientID(t *testing.T) {
 	source := NewTestTone(48000, 2)
 

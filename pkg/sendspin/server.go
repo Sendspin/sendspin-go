@@ -51,6 +51,12 @@ type ServerConfig struct {
 	// clients advertising _sendspin._tcp and dial out to them.
 	// See https://www.sendspin-audio.com/spec/ — "server-initiated" mode.
 	DiscoverClients bool
+
+	// SupportedRoles lists the role families this server activates.
+	// When nil, defaults to ["player", "metadata"] for backward compat.
+	// Roles registered via Group.RegisterRole are also activated
+	// regardless of this list.
+	SupportedRoles []string
 }
 
 type Server struct {
@@ -101,6 +107,9 @@ func NewServer(config ServerConfig) (*Server, error) {
 	}
 	if config.Source == nil {
 		return nil, fmt.Errorf("audio source is required")
+	}
+	if config.SupportedRoles == nil {
+		config.SupportedRoles = []string{"player", "metadata"}
 	}
 
 	mux := http.NewServeMux()
@@ -465,18 +474,30 @@ func (s *Server) removeClient(c *ServerClient) {
 	close(c.done)
 }
 
-// activateRoles filters a client's advertised role list down to the roles this
-// server actually implements, keeping only the first version of each role family
-// so "player@v1" wins over a later "player@v2" entry in the same hello.
-//
-// Implemented: player (audio streaming), metadata (track info via server/state).
-// Not implemented: visualizer, artwork, controller.
+// activateRoles filters a client's advertised role list down to the roles
+// this server supports (via config + registered GroupRoles), keeping only
+// the first version of each role family so "player@v1" wins over a later
+// "player@v2" entry in the same hello.
 func (s *Server) activateRoles(supportedRoles []string) []string {
+	// Build the set of role families this server supports.
+	allowed := make(map[string]bool)
+	for _, family := range s.config.SupportedRoles {
+		allowed[family] = true
+	}
+
+	// Roles registered on the Group are also allowed.
+	if s.defaultGroup != nil {
+		s.defaultGroup.mu.RLock()
+		for family := range s.defaultGroup.roles {
+			allowed[family] = true
+		}
+		s.defaultGroup.mu.RUnlock()
+	}
+
 	seen := make(map[string]bool)
 	result := make([]string, 0, len(supportedRoles))
 
 	for _, role := range supportedRoles {
-		// Extract role family (e.g., "player" from "player@v1")
 		family := role
 		if idx := strings.Index(role, "@"); idx > 0 {
 			family = role[:idx]
@@ -486,8 +507,7 @@ func (s *Server) activateRoles(supportedRoles []string) []string {
 			continue
 		}
 
-		switch family {
-		case "player", "metadata":
+		if allowed[family] {
 			seen[family] = true
 			result = append(result, role)
 		}
