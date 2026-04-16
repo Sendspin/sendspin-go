@@ -377,6 +377,100 @@ func TestServerMultipleClients(t *testing.T) {
 	time.Sleep(100 * time.Millisecond)
 }
 
+// TestServer_GroupReceivesEventsFromRealHandshake is the real wiring
+// guard for M2: it stands up an actual Server, subscribes to the
+// default group BEFORE the server starts accepting connections, then
+// drives a full WebSocket handshake via the gorilla client and asserts
+// that ClientJoinedEvent and ClientLeftEvent are delivered through the
+// event bus. A future refactor that moved defaultGroup.addClient out of
+// handleConnection (or routed it through a different Group) would fail
+// this test, which is exactly the guarantee the helper-level test cannot
+// provide.
+func TestServer_GroupReceivesEventsFromRealHandshake(t *testing.T) {
+	server, err := NewServer(ServerConfig{
+		Port:   8933,
+		Name:   "Group Wiring Test",
+		Source: NewTestTone(48000, 2),
+	})
+	if err != nil {
+		t.Fatalf("NewServer: %v", err)
+	}
+
+	// Subscribe BEFORE Start so the join event is guaranteed to land.
+	events, unsubscribe := server.Group().Subscribe()
+	defer unsubscribe()
+
+	errChan := make(chan error, 1)
+	go func() { errChan <- server.Start() }()
+	defer func() {
+		server.Stop()
+		select {
+		case <-errChan:
+		case <-time.After(5 * time.Second):
+			t.Error("server did not stop within timeout")
+		}
+	}()
+
+	time.Sleep(200 * time.Millisecond)
+
+	conn, _, err := websocket.DefaultDialer.Dial("ws://localhost:8933/sendspin", nil)
+	if err != nil {
+		t.Fatalf("dial: %v", err)
+	}
+
+	hello := protocol.Message{
+		Type: "client/hello",
+		Payload: protocol.ClientHello{
+			ClientID:       "wiring-test-client",
+			Name:           "Wiring Test Client",
+			Version:        1,
+			SupportedRoles: []string{"player@v1"},
+			PlayerV1Support: &protocol.PlayerV1Support{
+				SupportedFormats: []protocol.AudioFormat{
+					{Codec: "pcm", Channels: 2, SampleRate: 48000, BitDepth: 24},
+				},
+				BufferCapacity: 1048576,
+			},
+		},
+	}
+	if err := conn.WriteJSON(hello); err != nil {
+		conn.Close()
+		t.Fatalf("write hello: %v", err)
+	}
+
+	// Wait for the ClientJoinedEvent delivered through the real wiring.
+	select {
+	case evt := <-events:
+		joined, ok := evt.(ClientJoinedEvent)
+		if !ok {
+			conn.Close()
+			t.Fatalf("first event = %T, want ClientJoinedEvent", evt)
+		}
+		if joined.Client.ID() != "wiring-test-client" {
+			t.Errorf("joined Client.ID() = %q, want %q", joined.Client.ID(), "wiring-test-client")
+		}
+	case <-time.After(2 * time.Second):
+		conn.Close()
+		t.Fatal("timed out waiting for ClientJoinedEvent from real handshake")
+	}
+
+	// Disconnect and assert the matching ClientLeftEvent fires.
+	conn.Close()
+
+	select {
+	case evt := <-events:
+		left, ok := evt.(ClientLeftEvent)
+		if !ok {
+			t.Fatalf("second event = %T, want ClientLeftEvent", evt)
+		}
+		if left.ClientID != "wiring-test-client" {
+			t.Errorf("left ClientID = %q, want %q", left.ClientID, "wiring-test-client")
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("timed out waiting for ClientLeftEvent after disconnect")
+	}
+}
+
 func TestServerDuplicateClientID(t *testing.T) {
 	source := NewTestTone(48000, 2)
 

@@ -104,3 +104,36 @@ func (c *ServerClient) SendBinary(data []byte) error {
 		return fmt.Errorf("client send buffer full")
 	}
 }
+
+// State returns the client's current playback state ("synchronized",
+// "playing", "paused"). Safe to call concurrently with state updates.
+func (c *ServerClient) State() string {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+	return c.state
+}
+
+// Volume returns the client's reported volume (0-100). Safe to call
+// concurrently with state updates.
+func (c *ServerClient) Volume() int {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+	return c.volume
+}
+
+// Muted returns the client's mute state. Safe to call concurrently with
+// state updates.
+func (c *ServerClient) Muted() bool {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+	return c.muted
+}
+
+// Codec returns the currently-negotiated codec name ("pcm", "opus", "").
+// Returns the empty string before stream negotiation completes. Safe to
+// call concurrently with state updates.
+func (c *ServerClient) Codec() string {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+	return c.codec
+}

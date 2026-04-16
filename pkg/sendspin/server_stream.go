@@ -233,11 +233,6 @@ func (s *Server) negotiateCodec(c *ServerClient) string {
 	return "pcm"
 }
 
-// getClockMicros returns server uptime in microseconds (monotonic, not wall clock).
-func (s *Server) getClockMicros() int64 {
-	return time.Since(s.clockStart).Microseconds()
-}
-
 func strPtr(s string) *string {
 	return &s
 }

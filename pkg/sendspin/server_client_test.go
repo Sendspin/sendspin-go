@@ -95,3 +95,51 @@ func TestServerClient_SendBinaryBufferFull(t *testing.T) {
 		t.Error("second SendBinary to full buffer should return error, got nil")
 	}
 }
+
+// TestServerClient_StateAccessors confirms that State/Volume/Muted/Codec
+// return the mutable playback fields under the client's RWMutex. These
+// are the fields the M2 Group event bus carries in ClientStateChangedEvent,
+// so their shape is load-bearing for M3's role handlers.
+func TestServerClient_StateAccessors(t *testing.T) {
+	sc := &ServerClient{
+		state:  "synchronized",
+		volume: 72,
+		muted:  true,
+		codec:  "opus",
+	}
+
+	if got := sc.State(); got != "synchronized" {
+		t.Errorf("State() = %q, want %q", got, "synchronized")
+	}
+	if got := sc.Volume(); got != 72 {
+		t.Errorf("Volume() = %d, want 72", got)
+	}
+	if got := sc.Muted(); got != true {
+		t.Errorf("Muted() = %v, want true", got)
+	}
+	if got := sc.Codec(); got != "opus" {
+		t.Errorf("Codec() = %q, want %q", got, "opus")
+	}
+}
+
+// TestServerClient_StateAccessorsConcurrent is a light race-detector bait.
+// Running Write/Read in parallel under -race should flag any missing lock.
+func TestServerClient_StateAccessorsConcurrent(t *testing.T) {
+	sc := &ServerClient{state: "synchronized", volume: 50}
+
+	done := make(chan struct{})
+	go func() {
+		for i := 0; i < 1000; i++ {
+			sc.mu.Lock()
+			sc.volume = i % 100
+			sc.mu.Unlock()
+		}
+		close(done)
+	}()
+
+	for i := 0; i < 1000; i++ {
+		_ = sc.Volume()
+		_ = sc.State()
+	}
+	<-done
+}
