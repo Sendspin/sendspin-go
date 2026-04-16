@@ -370,7 +370,11 @@ func (r *Receiver) handleGroupUpdates() {
 		select {
 		case update := <-r.client.GroupUpdate:
 			if update.PlaybackState != nil {
-				log.Printf("Group playback state: %s", *update.PlaybackState)
+				state := *update.PlaybackState
+				log.Printf("Group playback state: %s", state)
+				if (state == "paused" || state == "stopped") && r.scheduler != nil {
+					r.scheduler.Clear()
+				}
 			}
 			if update.GroupID != nil {
 				log.Printf("Joined group: %s", *update.GroupID)
