@@ -1,5 +1,5 @@
 # ABOUTME: CI workflow for pull requests and main branch pushes
-# ABOUTME: Runs tests, linting, and builds across multiple Go versions
+# ABOUTME: Tests on Linux, builds player + server on Linux/macOS/Windows
 name: CI
 
 on:
@@ -12,13 +12,9 @@ jobs:
   test:
     name: Test
     runs-on: ubuntu-latest
-
     steps:
-    - name: Checkout code
-      uses: actions/checkout@v4
-
-    - name: Set up Go
-      uses: actions/setup-go@v5
+    - uses: actions/checkout@v4
+    - uses: actions/setup-go@v5
       with:
         go-version: '1.24'
 
@@ -27,37 +23,21 @@ jobs:
         sudo apt-get update
         sudo apt-get install -y libopus-dev libopusfile-dev libasound2-dev
 
-    - name: Download dependencies
-      run: go mod download
-
-    - name: Verify dependencies
-      run: go mod verify
-
     - name: Run tests
       run: go test -v -race -coverprofile=coverage.out -covermode=atomic ./...
 
-    - name: Upload coverage to Codecov
+    - name: Upload coverage
       uses: codecov/codecov-action@v4
       with:
         file: ./coverage.out
-        flags: unittests
         fail_ci_if_error: false
-
-    - name: Build binaries
-      run: |
-        go build -v -o sendspin-player .
-        go build -v -o sendspin-server ./cmd/sendspin-server
 
   lint:
     name: Lint
     runs-on: ubuntu-latest
-
     steps:
-    - name: Checkout code
-      uses: actions/checkout@v4
-
-    - name: Set up Go
-      uses: actions/setup-go@v5
+    - uses: actions/checkout@v4
+    - uses: actions/setup-go@v5
       with:
         go-version: '1.24'
 
@@ -73,24 +53,98 @@ jobs:
         args: --timeout=5m
 
   build:
-    name: Build
-    runs-on: ubuntu-latest
+    name: Build ${{ matrix.os }}/${{ matrix.arch }}
+    runs-on: ${{ matrix.runner }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: linux
+            arch: amd64
+            runner: ubuntu-latest
+            ext: ""
+          - os: linux
+            arch: arm64
+            runner: ubuntu-24.04-arm
+            ext: ""
+          - os: darwin
+            arch: arm64
+            runner: macos-latest
+            ext: ""
+          - os: windows
+            arch: amd64
+            runner: windows-latest
+            ext: ".exe"
 
     steps:
-    - name: Checkout code
-      uses: actions/checkout@v4
+    - uses: actions/checkout@v4
+      with:
+        fetch-depth: 0
 
-    - name: Set up Go
-      uses: actions/setup-go@v5
+    - uses: actions/setup-go@v5
       with:
         go-version: '1.24'
 
-    - name: Install dependencies
+    # Linux dependencies
+    - name: Install dependencies (Linux)
+      if: matrix.os == 'linux'
       run: |
         sudo apt-get update
         sudo apt-get install -y libopus-dev libopusfile-dev libasound2-dev
 
-    - name: Build native binaries
+    # macOS dependencies
+    - name: Install dependencies (macOS)
+      if: matrix.os == 'darwin'
+      run: brew install opus opusfile
+
+    # Windows dependencies via MSYS2
+    - name: Install dependencies (Windows)
+      if: matrix.os == 'windows'
+      uses: msys2/setup-msys2@v2
+      with:
+        msystem: MINGW64
+        update: false
+        install: >-
+          mingw-w64-x86_64-gcc
+          mingw-w64-x86_64-pkg-config
+          mingw-w64-x86_64-opus
+          mingw-w64-x86_64-opusfile
+
+    - name: Get version
+      id: version
+      shell: bash
+      run: echo "VERSION=$(git describe --tags --always --dirty 2>/dev/null || echo dev)" >> $GITHUB_OUTPUT
+
+    # Linux + macOS build
+    - name: Build (Unix)
+      if: matrix.os != 'windows'
+      env:
+        CGO_ENABLED: "1"
       run: |
-        go build -v -o sendspin-player .
-        go build -v -o sendspin-server ./cmd/sendspin-server
+        LDFLAGS="-X github.com/Sendspin/sendspin-go/internal/version.Version=${{ steps.version.outputs.VERSION }}"
+        go build -ldflags "${LDFLAGS}" -o sendspin-player-${{ matrix.os }}-${{ matrix.arch }} .
+        go build -ldflags "${LDFLAGS}" -o sendspin-server-${{ matrix.os }}-${{ matrix.arch }} ./cmd/sendspin-server
+
+    # Windows build — needs MSYS2 MinGW on PATH for CGO
+    - name: Build (Windows)
+      if: matrix.os == 'windows'
+      shell: cmd
+      run: |
+        set PATH=D:\a\_temp\msys64\mingw64\bin;%PATH%
+        set CGO_ENABLED=1
+        set CC=gcc
+        set LDFLAGS=-X github.com/Sendspin/sendspin-go/internal/version.Version=${{ steps.version.outputs.VERSION }}
+        go build -ldflags "%LDFLAGS%" -o sendspin-player-windows-amd64.exe .
+        go build -ldflags "%LDFLAGS%" -o sendspin-server-windows-amd64.exe .\cmd\sendspin-server
+
+    - name: Upload player
+      uses: actions/upload-artifact@v4
+      with:
+        name: sendspin-player-${{ matrix.os }}-${{ matrix.arch }}
+        path: sendspin-player-${{ matrix.os }}-${{ matrix.arch }}${{ matrix.ext }}
+
+    - name: Upload server
+      uses: actions/upload-artifact@v4
+      with:
+        name: sendspin-server-${{ matrix.os }}-${{ matrix.arch }}
+        path: sendspin-server-${{ matrix.os }}-${{ matrix.arch }}${{ matrix.ext }}
