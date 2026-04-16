@@ -2,7 +2,7 @@
 // ABOUTME: Defines Format, Buffer types and sample conversion functions
 // Package audio provides fundamental audio types and utilities for hi-res audio processing.
 //
-// This package defines core types used throughout the resonate library:
+// This package defines core types used throughout the sendspin library:
 //   - Format: Describes audio stream format (codec, sample rate, channels, bit depth)
 //   - Buffer: Represents decoded PCM audio with timestamp information
 //
