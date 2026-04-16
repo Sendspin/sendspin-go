@@ -751,3 +751,123 @@ func TestServerDuplicateClientID(t *testing.T) {
 	server.Stop()
 	time.Sleep(100 * time.Millisecond)
 }
+
+// TestServer_FLACStreamNegotiation verifies that a client advertising
+// FLAC as its preferred codec receives stream/start with codec="flac"
+// and a valid codec_header, followed by binary FLAC audio chunks.
+func TestServer_FLACStreamNegotiation(t *testing.T) {
+	s, err := NewServer(ServerConfig{
+		Port:   8936,
+		Name:   "FLAC Test Server",
+		Source: NewTestTone(48000, 2),
+	})
+	if err != nil {
+		t.Fatalf("NewServer: %v", err)
+	}
+
+	errChan := make(chan error, 1)
+	go func() { errChan <- s.Start() }()
+	defer func() {
+		s.Stop()
+		select {
+		case <-errChan:
+		case <-time.After(5 * time.Second):
+			t.Error("server stop timeout")
+		}
+	}()
+
+	time.Sleep(200 * time.Millisecond)
+
+	conn, _, err := websocket.DefaultDialer.Dial("ws://localhost:8936/sendspin", nil)
+	if err != nil {
+		t.Fatalf("dial: %v", err)
+	}
+	defer conn.Close()
+
+	// Advertise FLAC as first format (simulates --preferred-codec flac)
+	hello := protocol.Message{
+		Type: "client/hello",
+		Payload: protocol.ClientHello{
+			ClientID:       "flac-test-client",
+			Name:           "FLAC Test Client",
+			Version:        1,
+			SupportedRoles: []string{"player@v1", "metadata@v1"},
+			PlayerV1Support: &protocol.PlayerV1Support{
+				SupportedFormats: []protocol.AudioFormat{
+					{Codec: "flac", SampleRate: 48000, Channels: 2, BitDepth: 24},
+					{Codec: "pcm", SampleRate: 48000, Channels: 2, BitDepth: 24},
+				},
+				BufferCapacity: 1048576,
+			},
+		},
+	}
+	if err := conn.WriteJSON(hello); err != nil {
+		t.Fatalf("write hello: %v", err)
+	}
+
+	// Read messages looking for stream/start with FLAC codec.
+	// The order of messages after server/hello is non-deterministic
+	// (group/update, stream/start, server/state may interleave).
+	var foundStreamStart bool
+	var codecHeader string
+	deadline := time.Now().Add(5 * time.Second)
+
+	for time.Now().Before(deadline) {
+		conn.SetReadDeadline(deadline)
+		msgType, data, err := conn.ReadMessage()
+		if err != nil {
+			t.Fatalf("read: %v", err)
+		}
+
+		if msgType == websocket.BinaryMessage {
+			// Got a binary audio chunk before finding stream/start
+			if !foundStreamStart {
+				t.Fatal("received binary chunk before stream/start")
+			}
+			// Verify it's a valid audio chunk (at least header + some data)
+			if len(data) < 10 {
+				t.Errorf("audio chunk too small: %d bytes", len(data))
+			}
+			t.Logf("Received FLAC audio chunk: %d bytes", len(data))
+			break // Success — we got stream/start + at least one chunk
+		}
+
+		// Text message — parse the envelope
+		var msg protocol.Message
+		if err := json.Unmarshal(data, &msg); err != nil {
+			t.Fatalf("unmarshal: %v", err)
+		}
+
+		if msg.Type == "stream/start" {
+			startData, _ := json.Marshal(msg.Payload)
+			var streamStart protocol.StreamStart
+			if err := json.Unmarshal(startData, &streamStart); err != nil {
+				t.Fatalf("unmarshal stream/start: %v", err)
+			}
+
+			if streamStart.Player == nil {
+				t.Fatal("stream/start has no player info")
+			}
+			if streamStart.Player.Codec != "flac" {
+				t.Errorf("codec = %q, want flac", streamStart.Player.Codec)
+			}
+			if streamStart.Player.CodecHeader == "" {
+				t.Error("codec_header is empty — FLAC requires STREAMINFO")
+			}
+			if streamStart.Player.SampleRate != 48000 {
+				t.Errorf("sample_rate = %d, want 48000", streamStart.Player.SampleRate)
+			}
+			if streamStart.Player.BitDepth != 24 {
+				t.Errorf("bit_depth = %d, want 24", streamStart.Player.BitDepth)
+			}
+
+			codecHeader = streamStart.Player.CodecHeader
+			foundStreamStart = true
+			t.Logf("stream/start received: codec=flac, codec_header=%d chars (base64)", len(codecHeader))
+		}
+	}
+
+	if !foundStreamStart {
+		t.Fatal("never received stream/start with FLAC")
+	}
+}

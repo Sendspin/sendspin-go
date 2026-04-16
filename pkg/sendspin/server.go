@@ -148,6 +148,9 @@ func NewServer(config ServerConfig) (*Server, error) {
 		NewEncoder: func(sampleRate, channels, chunkSamples int) (*server.OpusEncoder, error) {
 			return server.NewOpusEncoder(sampleRate, channels, chunkSamples)
 		},
+		NewFLACEncoder: func(sampleRate, channels, bitDepth, blockSize int) (*server.FLACEncoder, error) {
+			return server.NewFLACEncoder(sampleRate, channels, bitDepth, blockSize)
+		},
 	}))
 
 	return s, nil
@@ -479,6 +482,10 @@ func (s *Server) removeClient(c *ServerClient) {
 	if c.opusEncoder != nil {
 		c.opusEncoder.Close()
 		c.opusEncoder = nil
+	}
+	if c.flacEncoder != nil {
+		c.flacEncoder.Close()
+		c.flacEncoder = nil
 	}
 	c.resampler = nil
 	c.mu.Unlock()
