@@ -92,7 +92,7 @@ func (s *Server) generateAndSendChunk() {
 			audioData = encodePCM(samples[:n])
 		}
 
-		chunk := createAudioChunk(playbackTime, audioData)
+		chunk := CreateAudioChunk(playbackTime, audioData)
 
 		if err := c.SendBinary(chunk); err != nil {
 			if s.config.Debug {
@@ -148,13 +148,23 @@ func strPtr(s string) *string {
 	return &s
 }
 
-// createAudioChunk packs timestamp + payload into a Sendspin binary frame:
+// CreateAudioChunk packs timestamp + payload into a Sendspin binary frame:
 // [1 byte message type][8 byte big-endian timestamp (µs)][audio bytes].
-func createAudioChunk(timestamp int64, audioData []byte) []byte {
+func CreateAudioChunk(timestamp int64, audioData []byte) []byte {
 	chunk := make([]byte, 1+8+len(audioData))
 	chunk[0] = AudioChunkMessageType
 	binary.BigEndian.PutUint64(chunk[1:9], uint64(timestamp))
 	copy(chunk[9:], audioData)
+	return chunk
+}
+
+// CreateArtworkChunk packs an artwork frame: [1 byte message type][8 byte timestamp (us)][image bytes].
+// Channel is 0-3, mapping to the artwork channel message types.
+func CreateArtworkChunk(channel int, timestamp int64, imageData []byte) []byte {
+	chunk := make([]byte, protocol.BinaryMessageHeaderSize+len(imageData))
+	chunk[0] = byte(protocol.ArtworkChannel0MessageType + channel)
+	binary.BigEndian.PutUint64(chunk[1:protocol.BinaryMessageHeaderSize], uint64(timestamp))
+	copy(chunk[protocol.BinaryMessageHeaderSize:], imageData)
 	return chunk
 }
 

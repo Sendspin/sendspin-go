@@ -3,9 +3,11 @@
 package sendspin
 
 import (
+	"encoding/json"
 	"fmt"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/Sendspin/sendspin-go/internal/server"
 	"github.com/Sendspin/sendspin-go/pkg/audio"
@@ -136,4 +138,84 @@ func (c *ServerClient) Codec() string {
 	c.mu.RLock()
 	defer c.mu.RUnlock()
 	return c.codec
+}
+
+// NewServerClientFromConn wraps an existing WebSocket connection in a
+// ServerClient and starts a background writer goroutine. This is the
+// entry point for code that accepts its own WebSocket connections
+// (e.g., conformance adapters) and wants to use the typed Send/SendBinary
+// API without constructing a full Server.
+//
+// The caller is responsible for reading from the connection; the writer
+// goroutine handles outbound messages via Send/SendBinary. Call Close()
+// when done to stop the writer and release resources.
+func NewServerClientFromConn(conn *websocket.Conn, id, name string, roles []string, capabilities *protocol.PlayerV1Support) *ServerClient {
+	c := &ServerClient{
+		id:           id,
+		name:         name,
+		conn:         conn,
+		roles:        roles,
+		capabilities: capabilities,
+		state:        "synchronized",
+		volume:       100,
+		sendChan:     make(chan interface{}, 100),
+		done:         make(chan struct{}),
+	}
+	go c.runWriter()
+	return c
+}
+
+// runWriter drains the sendChan and writes messages to the WebSocket.
+// Exits when the done channel is closed (via Close). This is the
+// standalone equivalent of Server.clientWriter for ServerClients
+// created via NewServerClientFromConn.
+func (c *ServerClient) runWriter() {
+	ticker := time.NewTicker(30 * time.Second)
+	defer ticker.Stop()
+
+	const writeDeadline = 10 * time.Second
+
+	for {
+		select {
+		case msg := <-c.sendChan:
+			switch v := msg.(type) {
+			case []byte:
+				c.conn.SetWriteDeadline(time.Now().Add(writeDeadline))
+				if err := c.conn.WriteMessage(websocket.BinaryMessage, v); err != nil {
+					return
+				}
+			default:
+				data, err := json.Marshal(v)
+				if err != nil {
+					continue
+				}
+				c.conn.SetWriteDeadline(time.Now().Add(writeDeadline))
+				if err := c.conn.WriteMessage(websocket.TextMessage, data); err != nil {
+					return
+				}
+			}
+
+		case <-ticker.C:
+			if err := c.conn.WriteControl(websocket.PingMessage, []byte{}, time.Now().Add(10*time.Second)); err != nil {
+				return
+			}
+
+		case <-c.done:
+			return
+		}
+	}
+}
+
+// Close stops the writer goroutine and signals that this ServerClient
+// is done. Safe to call multiple times. Does NOT close the underlying
+// WebSocket connection — the caller owns that lifecycle.
+func (c *ServerClient) Close() {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	select {
+	case <-c.done:
+		// Already closed
+	default:
+		close(c.done)
+	}
 }

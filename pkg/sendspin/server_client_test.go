@@ -3,7 +3,14 @@
 package sendspin
 
 import (
+	"encoding/json"
+	"net/http"
+	"net/http/httptest"
 	"testing"
+	"time"
+
+	"github.com/Sendspin/sendspin-go/pkg/protocol"
+	"github.com/gorilla/websocket"
 )
 
 // TestServerClient_Accessors confirms that the six exported accessors on
@@ -142,4 +149,79 @@ func TestServerClient_StateAccessorsConcurrent(t *testing.T) {
 		_ = sc.State()
 	}
 	<-done
+}
+
+// TestNewServerClientFromConn_SendAndClose confirms the constructor +
+// writer + Close lifecycle works: messages enqueued via Send arrive on
+// the WebSocket, and Close stops the writer without panic.
+func TestNewServerClientFromConn_SendAndClose(t *testing.T) {
+	// Use an in-process WebSocket pair via httptest.
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		upgrader := websocket.Upgrader{}
+		conn, err := upgrader.Upgrade(w, r, nil)
+		if err != nil {
+			return
+		}
+		defer conn.Close()
+
+		// Read the one message we expect.
+		_, data, err := conn.ReadMessage()
+		if err != nil {
+			t.Errorf("server read: %v", err)
+			return
+		}
+		var msg protocol.Message
+		if err := json.Unmarshal(data, &msg); err != nil {
+			t.Errorf("unmarshal: %v", err)
+			return
+		}
+		if msg.Type != "server/hello" {
+			t.Errorf("got type %q, want server/hello", msg.Type)
+		}
+	}))
+	defer srv.Close()
+
+	wsURL := "ws" + srv.URL[len("http"):]
+	conn, _, err := websocket.DefaultDialer.Dial(wsURL, nil)
+	if err != nil {
+		t.Fatalf("dial: %v", err)
+	}
+	defer conn.Close()
+
+	sc := NewServerClientFromConn(conn, "test-id", "Test", []string{"player@v1"}, nil)
+
+	if err := sc.Send("server/hello", map[string]string{"name": "test"}); err != nil {
+		t.Fatalf("Send: %v", err)
+	}
+
+	// Give the writer time to flush.
+	time.Sleep(50 * time.Millisecond)
+
+	sc.Close()
+	// Double-close should not panic.
+	sc.Close()
+}
+
+// TestCreateAudioChunk confirms the exported helper produces the
+// correct binary frame format.
+func TestCreateAudioChunk(t *testing.T) {
+	chunk := CreateAudioChunk(1000000, []byte{0xAA, 0xBB})
+	if chunk[0] != AudioChunkMessageType {
+		t.Errorf("type byte = %d, want %d", chunk[0], AudioChunkMessageType)
+	}
+	if len(chunk) != 9+2 {
+		t.Errorf("len = %d, want 11", len(chunk))
+	}
+}
+
+// TestCreateArtworkChunk confirms channel mapping and frame format.
+func TestCreateArtworkChunk(t *testing.T) {
+	chunk := CreateArtworkChunk(2, 5000000, []byte{0xFF})
+	expectedType := byte(protocol.ArtworkChannel0MessageType + 2)
+	if chunk[0] != expectedType {
+		t.Errorf("type byte = %d, want %d", chunk[0], expectedType)
+	}
+	if len(chunk) != protocol.BinaryMessageHeaderSize+1 {
+		t.Errorf("len = %d, want %d", len(chunk), protocol.BinaryMessageHeaderSize+1)
+	}
 }
