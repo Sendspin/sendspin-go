@@ -1,5 +1,5 @@
 # ABOUTME: Release workflow triggered by version tags
-# ABOUTME: Builds multi-platform binaries and creates GitHub releases
+# ABOUTME: Builds player + server for Linux/macOS/Windows and creates GitHub release
 name: Release
 
 on:
@@ -15,11 +15,8 @@ jobs:
     name: Test Before Release
     runs-on: ubuntu-latest
     steps:
-    - name: Checkout code
-      uses: actions/checkout@v4
-
-    - name: Set up Go
-      uses: actions/setup-go@v5
+    - uses: actions/checkout@v4
+    - uses: actions/setup-go@v5
       with:
         go-version: '1.24'
 
@@ -28,44 +25,50 @@ jobs:
         sudo apt-get update
         sudo apt-get install -y libopus-dev libopusfile-dev libasound2-dev
 
-    - name: Download dependencies
-      run: go mod download
-
-    - name: Verify dependencies
-      run: go mod verify
-
     - name: Run tests
       run: go test -v -race ./...
 
-    - name: Run linter
+    - name: Lint
       uses: golangci/golangci-lint-action@v6
       with:
         version: latest
         args: --timeout=5m
 
   build:
-    name: Build ${{ matrix.os }} ${{ matrix.arch }}
+    name: Build ${{ matrix.os }}/${{ matrix.arch }}
     needs: test
     runs-on: ${{ matrix.runner }}
     strategy:
+      fail-fast: false
       matrix:
         include:
           - os: linux
             arch: amd64
             runner: ubuntu-latest
+            ext: ""
+          - os: linux
+            arch: arm64
+            runner: ubuntu-24.04-arm
+            ext: ""
+          - os: darwin
+            arch: arm64
+            runner: macos-latest
+            ext: ""
+          - os: windows
+            arch: amd64
+            runner: windows-latest
+            ext: ".exe"
 
     steps:
-    - name: Checkout code
-      uses: actions/checkout@v4
+    - uses: actions/checkout@v4
       with:
         fetch-depth: 0
 
-    - name: Set up Go
-      uses: actions/setup-go@v5
+    - uses: actions/setup-go@v5
       with:
         go-version: '1.24'
 
-    - name: Install dependencies (Ubuntu)
+    - name: Install dependencies (Linux)
       if: matrix.os == 'linux'
       run: |
         sudo apt-get update
@@ -73,59 +76,76 @@ jobs:
 
     - name: Install dependencies (macOS)
       if: matrix.os == 'darwin'
-      run: |
-        brew install opus opusfile
+      run: brew install opus opusfile
 
-    - name: Get version from tag
+    - name: Install dependencies (Windows)
+      if: matrix.os == 'windows'
+      uses: msys2/setup-msys2@v2
+      with:
+        msystem: MINGW64
+        update: false
+        install: >-
+          mingw-w64-x86_64-gcc
+          mingw-w64-x86_64-pkg-config
+          mingw-w64-x86_64-opus
+          mingw-w64-x86_64-opusfile
+
+    - name: Get version
       id: version
+      shell: bash
       run: echo "VERSION=${GITHUB_REF#refs/tags/}" >> $GITHUB_OUTPUT
 
-    - name: Build binaries
+    - name: Build (Unix)
+      if: matrix.os != 'windows'
       env:
-        BUILD_VERSION: ${{ steps.version.outputs.VERSION }}
-        BUILD_OS: ${{ matrix.os }}
-        BUILD_ARCH: ${{ matrix.arch }}
+        CGO_ENABLED: "1"
       run: |
-        mkdir -p dist
+        LDFLAGS="-X github.com/Sendspin/sendspin-go/internal/version.Version=${{ steps.version.outputs.VERSION }} -s -w"
+        go build -ldflags "${LDFLAGS}" -o sendspin-player-${{ matrix.os }}-${{ matrix.arch }} .
+        go build -ldflags "${LDFLAGS}" -o sendspin-server-${{ matrix.os }}-${{ matrix.arch }} ./cmd/sendspin-server
 
-        export CGO_ENABLED=1
-
-        LDFLAGS="-X github.com/Sendspin/sendspin-go/internal/version.Version=${BUILD_VERSION} -s -w"
-
-        # Player
-        go build -ldflags "${LDFLAGS}" -o "dist/sendspin-player-${BUILD_OS}-${BUILD_ARCH}" .
-
-        # Show dependencies for verification
-        echo "Player dependencies:"
-        ldd "dist/sendspin-player-${BUILD_OS}-${BUILD_ARCH}" || true
-
-    - name: Create archives
+    - name: Build (Windows)
+      if: matrix.os == 'windows'
+      shell: cmd
       run: |
-        cd dist
-        for binary in *; do
-          if [ -f "$binary" ]; then
-            tar czf "${binary}.tar.gz" "$binary"
-          fi
-        done
-        ls -lh *.tar.gz
+        set PATH=D:\a\_temp\msys64\mingw64\bin;%PATH%
+        set CGO_ENABLED=1
+        set CC=gcc
+        set LDFLAGS=-X github.com/Sendspin/sendspin-go/internal/version.Version=${{ steps.version.outputs.VERSION }} -s -w
+        go build -ldflags "%LDFLAGS%" -o sendspin-player-windows-amd64.exe .
+        go build -ldflags "%LDFLAGS%" -o sendspin-server-windows-amd64.exe .\cmd\sendspin-server
+
+    - name: Create archives (Unix)
+      if: matrix.os != 'windows'
+      run: |
+        tar czf sendspin-player-${{ matrix.os }}-${{ matrix.arch }}.tar.gz sendspin-player-${{ matrix.os }}-${{ matrix.arch }}
+        tar czf sendspin-server-${{ matrix.os }}-${{ matrix.arch }}.tar.gz sendspin-server-${{ matrix.os }}-${{ matrix.arch }}
+
+    - name: Create archives (Windows)
+      if: matrix.os == 'windows'
+      shell: bash
+      run: |
+        7z a sendspin-player-windows-amd64.zip sendspin-player-windows-amd64.exe
+        7z a sendspin-server-windows-amd64.zip sendspin-server-windows-amd64.exe
 
     - name: Upload artifacts
       uses: actions/upload-artifact@v4
       with:
-        name: binaries-${{ matrix.os }}-${{ matrix.arch }}
-        path: dist/*.tar.gz
+        name: release-${{ matrix.os }}-${{ matrix.arch }}
+        path: |
+          sendspin-player-${{ matrix.os }}-${{ matrix.arch }}.*
+          sendspin-server-${{ matrix.os }}-${{ matrix.arch }}.*
 
   release:
     name: Create Release
     needs: build
     runs-on: ubuntu-latest
     steps:
-    - name: Checkout code
-      uses: actions/checkout@v4
+    - uses: actions/checkout@v4
       with:
         fetch-depth: 0
 
-    - name: Get version from tag
+    - name: Get version
       id: version
       run: echo "VERSION=${GITHUB_REF#refs/tags/}" >> $GITHUB_OUTPUT
 
@@ -133,82 +153,38 @@ jobs:
       uses: actions/download-artifact@v4
       with:
         path: artifacts
-        pattern: binaries-*
+        pattern: release-*
         merge-multiple: true
 
     - name: List artifacts
       run: ls -lh artifacts/
 
-    - name: Generate release notes
-      id: release_notes
-      env:
-        RELEASE_VERSION: ${{ steps.version.outputs.VERSION }}
-      run: |
-        PREV_TAG=$(git describe --tags --abbrev=0 "${RELEASE_VERSION}^" 2>/dev/null || echo "")
-        if [ -z "$PREV_TAG" ]; then
-          echo "NOTES=Initial release" >> $GITHUB_OUTPUT
-        else
-          NOTES=$(git log --pretty=format:"- %s (%h)" "${PREV_TAG}..${RELEASE_VERSION}")
-          echo "NOTES<<EOF" >> $GITHUB_OUTPUT
-          echo "$NOTES" >> $GITHUB_OUTPUT
-          echo "EOF" >> $GITHUB_OUTPUT
-        fi
-
     - name: Create GitHub Release
       uses: softprops/action-gh-release@v2
       with:
         tag_name: ${{ steps.version.outputs.VERSION }}
-        name: Release ${{ steps.version.outputs.VERSION }}
+        name: ${{ steps.version.outputs.VERSION }}
         body: |
-          ## Sendspin Protocol ${{ steps.version.outputs.VERSION }}
+          ## Sendspin ${{ steps.version.outputs.VERSION }}
 
           ### Downloads
 
-          **Linux (x86_64) - Portable Binaries**
+          | Platform | Player | Server |
+          |----------|--------|--------|
+          | Linux x86_64 | `sendspin-player-linux-amd64.tar.gz` | `sendspin-server-linux-amd64.tar.gz` |
+          | Linux ARM64 | `sendspin-player-linux-arm64.tar.gz` | `sendspin-server-linux-arm64.tar.gz` |
+          | macOS Apple Silicon | `sendspin-player-darwin-arm64.tar.gz` | `sendspin-server-darwin-arm64.tar.gz` |
+          | Windows x86_64 | `sendspin-player-windows-amd64.zip` | `sendspin-server-windows-amd64.zip` |
 
-          - **Player:** `sendspin-player-linux-amd64.tar.gz`
-
-          ### Installation
+          ### Daemon mode (Linux)
 
           ```bash
-          # Download and extract
           tar xzf sendspin-player-linux-amd64.tar.gz
-
-          # Run
-          ./sendspin-player-linux-amd64
+          sudo install -m 755 sendspin-player-linux-amd64 /usr/local/bin/sendspin-player
+          # Copy the systemd unit from dist/systemd/ in the source repo, then:
+          sudo systemctl enable --now sendspin-player
           ```
-
-          If you get missing library errors, install the audio system package:
-          ```bash
-          # Debian/Ubuntu
-          sudo apt-get install libasound2
-
-          # Fedora/RHEL
-          sudo dnf install alsa-lib
-
-          # Arch Linux
-          sudo pacman -S alsa-lib
-          ```
-
-          ### Building from Source (macOS/Other Platforms)
-
-          ```bash
-          git clone https://github.com/Sendspin/sendspin-go.git
-          cd sendspin-go
-
-          # Install dependencies
-          brew install opus opusfile  # macOS
-          # or: sudo apt-get install libopus-dev libopusfile-dev libasound2-dev  # Linux
-
-          # Build
-          make player
-          ```
-
-          ### Changes
-
-          ${{ steps.release_notes.outputs.NOTES }}
-        files: |
-          artifacts/*.tar.gz
+        files: artifacts/*
         draft: false
         prerelease: false
       env:
