@@ -22,6 +22,7 @@ type ReceiverConfig struct {
 	BufferMs       int
 	StaticDelayMs  int    // optional static latency compensation (ms) applied to every scheduled play time
 	PreferredCodec string // "pcm", "opus", or "flac" — reorders the advertised format list so the server picks this codec first
+	BufferCapacity int    // buffer_capacity in bytes advertised to the server (default: 1048576 = 1MB)
 	DeviceInfo     DeviceInfo
 	DecoderFactory func(audio.Format) (decode.Decoder, error)
 	OnMetadata     func(Metadata)
@@ -66,6 +67,9 @@ func NewReceiver(config ReceiverConfig) (*Receiver, error) {
 
 	if config.BufferMs == 0 {
 		config.BufferMs = 500
+	}
+	if config.BufferCapacity == 0 {
+		config.BufferCapacity = 1048576 // 1MB default
 	}
 	if config.DeviceInfo.ProductName == "" {
 		config.DeviceInfo.ProductName = "Sendspin Player"
@@ -148,7 +152,7 @@ func (r *Receiver) Connect() error {
 		},
 		PlayerV1Support: protocol.PlayerV1Support{
 			SupportedFormats:  buildSupportedFormats(r.config.PreferredCodec),
-			BufferCapacity:    1048576,
+			BufferCapacity:    r.config.BufferCapacity,
 			SupportedCommands: []string{"volume", "mute"},
 		},
 		ArtworkV1Support: &protocol.ArtworkV1Support{
@@ -157,7 +161,7 @@ func (r *Receiver) Connect() error {
 			},
 		},
 		VisualizerV1Support: &protocol.VisualizerV1Support{
-			BufferCapacity: 1048576,
+			BufferCapacity: r.config.BufferCapacity,
 		},
 	}
 

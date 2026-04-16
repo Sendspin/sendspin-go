@@ -57,6 +57,11 @@ type PlayerConfig struct {
 	// picks this codec first. Values: "pcm" (default), "opus", "flac".
 	PreferredCodec string
 
+	// BufferCapacity is the buffer_capacity (bytes) advertised to the
+	// server in client/hello. The server uses this to pace how far ahead
+	// it sends audio. Default: 1048576 (1MB).
+	BufferCapacity int
+
 	DeviceInfo DeviceInfo
 
 	OnMetadata func(Metadata)
@@ -194,6 +199,7 @@ func (p *Player) buildReceiver(addr string) (*Receiver, error) {
 		BufferMs:       p.config.BufferMs,
 		StaticDelayMs:  p.config.StaticDelayMs,
 		PreferredCodec: p.config.PreferredCodec,
+		BufferCapacity: p.config.BufferCapacity,
 		DeviceInfo:     p.config.DeviceInfo,
 		DecoderFactory: p.config.DecoderFactory,
 		OnMetadata:     p.config.OnMetadata,
