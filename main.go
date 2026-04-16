@@ -35,6 +35,7 @@ var (
 	noReconnect    = flag.Bool("no-reconnect", false, "Disable automatic reconnect on connection loss")
 	daemon         = flag.Bool("daemon", false, "Daemon mode: log to stdout only (journalctl-friendly), no TUI, no log file")
 	preferredCodec = flag.String("preferred-codec", "", "Preferred codec: pcm (default), opus, or flac")
+	bufferCapacity = flag.Int("buffer-capacity", 1048576, "Buffer capacity in bytes advertised to server (default: 1MB)")
 )
 
 func main() {
@@ -141,6 +142,7 @@ func main() {
 		BufferMs:       *bufferMs,
 		StaticDelayMs:  *staticDelayMs,
 		PreferredCodec: *preferredCodec,
+		BufferCapacity: *bufferCapacity,
 		DeviceInfo: sendspin.DeviceInfo{
 			ProductName:     deviceProduct,
 			Manufacturer:    deviceManufacturer,
