@@ -5,6 +5,8 @@ package sendspin
 import (
 	"log"
 	"sync"
+
+	"github.com/Sendspin/sendspin-go/pkg/protocol"
 )
 
 // Event is the sealed interface implemented by every event published on a
@@ -77,7 +79,8 @@ func (ClientStateChangedEvent) isGroupEvent() {}
 //
 // The zero value is not usable — construct via NewGroup.
 type Group struct {
-	id string
+	id            string
+	playbackState string
 
 	mu      sync.RWMutex
 	clients map[string]*ServerClient
@@ -93,9 +96,10 @@ type Group struct {
 // typically the server's UUID for the implicit default group.
 func NewGroup(id string) *Group {
 	return &Group{
-		id:      id,
-		clients: make(map[string]*ServerClient),
-		subs:    make(map[int]chan Event),
+		id:            id,
+		playbackState: "playing",
+		clients:       make(map[string]*ServerClient),
+		subs:          make(map[int]chan Event),
 	}
 }
 
@@ -197,6 +201,19 @@ func (g *Group) addClient(c *ServerClient) {
 	}
 	g.clients[c.ID()] = c
 
+	// Send group/update to the joining client — group-level concern,
+	// not role-specific. Sent before ClientJoinedEvent so role handlers
+	// can assume the client already knows its group context.
+	groupID := g.id
+	playbackState := g.playbackState
+	if playbackState == "" {
+		playbackState = "playing"
+	}
+	c.Send("group/update", protocol.GroupUpdate{
+		GroupID:       &groupID,
+		PlaybackState: &playbackState,
+	})
+
 	g.publishLocked(ClientJoinedEvent{Client: c})
 }
 
@@ -248,4 +265,12 @@ func (g *Group) Close() {
 		delete(g.subs, id)
 	}
 	clear(g.clients)
+}
+
+// SetPlaybackState updates the group's playback state. Future clients
+// joining the group will receive this state in group/update.
+func (g *Group) SetPlaybackState(state string) {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	g.playbackState = state
 }

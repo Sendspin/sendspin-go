@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/Sendspin/sendspin-go/internal/discovery"
+	"github.com/Sendspin/sendspin-go/internal/server"
 	"github.com/Sendspin/sendspin-go/pkg/protocol"
 	"github.com/google/uuid"
 	"github.com/gorilla/websocket"
@@ -132,6 +133,22 @@ func NewServer(config ServerConfig) (*Server, error) {
 	}
 
 	s.defaultGroup = NewGroup(s.serverID)
+
+	s.defaultGroup.RegisterRole(NewMetadataRole(MetadataConfig{
+		GetMetadata: func() (string, string, string) {
+			return s.audioSource.Metadata()
+		},
+		ClockMicros: s.getClockMicros,
+	}))
+
+	s.defaultGroup.RegisterRole(NewPlayerRole(PlayerRoleConfig{
+		SampleRate: s.audioSource.SampleRate(),
+		Channels:   s.audioSource.Channels(),
+		BitDepth:   DefaultBitDepth,
+		NewEncoder: func(sampleRate, channels, chunkSamples int) (*server.OpusEncoder, error) {
+			return server.NewOpusEncoder(sampleRate, channels, chunkSamples)
+		},
+	}))
 
 	return s, nil
 }
@@ -375,8 +392,6 @@ func (s *Server) handleConnection(conn *websocket.Conn) {
 	s.clients[c.id] = c
 	s.clientsMu.Unlock()
 
-	s.defaultGroup.addClient(c)
-
 	defer func() {
 		s.removeClient(c)
 		log.Printf("Client disconnected: %s", c.name)
@@ -402,9 +417,12 @@ func (s *Server) handleConnection(conn *websocket.Conn) {
 		s.clientWriter(c)
 	}()
 
-	if c.HasRole("player") {
-		s.addClientToStream(c)
-	}
+	// Add to group AFTER server/hello and writer start so that:
+	// 1. server/hello is the first message the client receives
+	// 2. The writer goroutine is running to deliver group/update
+	//    (from addClient) and role-dispatched messages (stream/start,
+	//    server/state) via sendChan.
+	s.defaultGroup.addClient(c)
 
 	for {
 		_, data, err := conn.ReadMessage()
