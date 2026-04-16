@@ -285,6 +285,9 @@ func (r *Receiver) handleAudioChunks() {
 				r.notifyError(fmt.Errorf("decode error: %w", err))
 				continue
 			}
+			if len(pcm) == 0 {
+				continue
+			}
 
 			buf := audio.Buffer{
 				Timestamp: chunk.Timestamp,
