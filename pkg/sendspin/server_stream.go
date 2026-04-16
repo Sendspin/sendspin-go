@@ -105,7 +105,7 @@ func (s *Server) generateAndSendChunk() {
 }
 
 func (s *Server) addClientToStream(c *ServerClient) {
-	codec := s.negotiateCodec(c)
+	codec := negotiateCodec(c, s.audioSource.SampleRate())
 
 	var opusEncoder *server.OpusEncoder
 	var resampler *audio.Resampler
@@ -211,12 +211,12 @@ func (s *Server) notifyStreamEnd() {
 // negotiateCodec picks PCM at the source's native rate when advertised
 // (lossless hi-res), then falls through to Opus for bandwidth savings, then
 // PCM as a last resort.
-func (s *Server) negotiateCodec(c *ServerClient) string {
+func negotiateCodec(c *ServerClient, sourceSampleRate int) string {
 	if c.capabilities == nil {
 		return "pcm"
 	}
 
-	sourceRate := s.audioSource.SampleRate()
+	sourceRate := sourceSampleRate
 
 	for _, format := range c.capabilities.SupportedFormats {
 		if format.Codec == "pcm" && format.SampleRate == sourceRate && format.BitDepth == DefaultBitDepth {
