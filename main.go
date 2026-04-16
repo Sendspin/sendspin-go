@@ -22,18 +22,19 @@ import (
 )
 
 var (
-	serverAddr    = flag.String("server", "", "Manual server address (skip mDNS)")
-	port          = flag.Int("port", 8927, "Port for mDNS advertisement")
-	name          = flag.String("name", "", "Player friendly name (default: hostname-sendspin-player)")
-	bufferMs      = flag.Int("buffer-ms", 150, "Jitter buffer size in milliseconds")
-	staticDelayMs = flag.Int("static-delay-ms", 0, "Static playback delay in milliseconds for hardware latency compensation")
-	logFile       = flag.String("log-file", "sendspin-player.log", "Log file path")
-	noTUI         = flag.Bool("no-tui", false, "Disable TUI, use streaming logs instead")
-	streamLogs    = flag.Bool("stream-logs", false, "Alias for -no-tui")
-	productName   = flag.String("product-name", "", "Override the product name sent in device_info (default: compiled-in identity)")
-	manufacturer  = flag.String("manufacturer", "", "Override the manufacturer sent in device_info (default: compiled-in identity)")
-	noReconnect   = flag.Bool("no-reconnect", false, "Disable automatic reconnect on connection loss")
-	daemon        = flag.Bool("daemon", false, "Daemon mode: log to stdout only (journalctl-friendly), no TUI, no log file")
+	serverAddr     = flag.String("server", "", "Manual server address (skip mDNS)")
+	port           = flag.Int("port", 8927, "Port for mDNS advertisement")
+	name           = flag.String("name", "", "Player friendly name (default: hostname-sendspin-player)")
+	bufferMs       = flag.Int("buffer-ms", 150, "Jitter buffer size in milliseconds")
+	staticDelayMs  = flag.Int("static-delay-ms", 0, "Static playback delay in milliseconds for hardware latency compensation")
+	logFile        = flag.String("log-file", "sendspin-player.log", "Log file path")
+	noTUI          = flag.Bool("no-tui", false, "Disable TUI, use streaming logs instead")
+	streamLogs     = flag.Bool("stream-logs", false, "Alias for -no-tui")
+	productName    = flag.String("product-name", "", "Override the product name sent in device_info (default: compiled-in identity)")
+	manufacturer   = flag.String("manufacturer", "", "Override the manufacturer sent in device_info (default: compiled-in identity)")
+	noReconnect    = flag.Bool("no-reconnect", false, "Disable automatic reconnect on connection loss")
+	daemon         = flag.Bool("daemon", false, "Daemon mode: log to stdout only (journalctl-friendly), no TUI, no log file")
+	preferredCodec = flag.String("preferred-codec", "", "Preferred codec: pcm (default), opus, or flac")
 )
 
 func main() {
@@ -134,11 +135,12 @@ func main() {
 	}
 
 	config := sendspin.PlayerConfig{
-		ServerAddr:    serverAddress,
-		PlayerName:    playerName,
-		Volume:        100,
-		BufferMs:      *bufferMs,
-		StaticDelayMs: *staticDelayMs,
+		ServerAddr:     serverAddress,
+		PlayerName:     playerName,
+		Volume:         100,
+		BufferMs:       *bufferMs,
+		StaticDelayMs:  *staticDelayMs,
+		PreferredCodec: *preferredCodec,
 		DeviceInfo: sendspin.DeviceInfo{
 			ProductName:     deviceProduct,
 			Manufacturer:    deviceManufacturer,
