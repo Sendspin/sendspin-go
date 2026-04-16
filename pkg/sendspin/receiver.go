@@ -4,6 +4,7 @@ package sendspin
 
 import (
 	"context"
+	"encoding/base64"
 	"fmt"
 	"log"
 	"time"
@@ -209,6 +210,15 @@ func (r *Receiver) handleStreamStart() {
 				SampleRate: start.Player.SampleRate,
 				Channels:   start.Player.Channels,
 				BitDepth:   start.Player.BitDepth,
+			}
+
+			if start.Player.CodecHeader != "" {
+				headerBytes, err := base64.StdEncoding.DecodeString(start.Player.CodecHeader)
+				if err != nil {
+					log.Printf("Failed to decode codec_header: %v", err)
+				} else {
+					format.CodecHeader = headerBytes
+				}
 			}
 
 			var decoder decode.Decoder
