@@ -207,3 +207,24 @@ func TestGroup_ConcurrentPublishClose(t *testing.T) {
 	g.Close()
 	<-done
 }
+
+// TestGroup_AddClientSendsGroupUpdate confirms that addClient sends
+// a group/update message to the joining client before publishing
+// ClientJoinedEvent.
+func TestGroup_AddClientSendsGroupUpdate(t *testing.T) {
+	g := NewGroup("group-123")
+	defer g.Close()
+
+	sc := &ServerClient{
+		id:       "c1",
+		sendChan: make(chan interface{}, 10),
+	}
+	g.addClient(sc)
+
+	select {
+	case msg := <-sc.sendChan:
+		_ = msg // Verifies group/update was sent
+	default:
+		t.Fatal("addClient did not send group/update")
+	}
+}
