@@ -4,6 +4,7 @@ package sendspin
 
 import (
 	"context"
+	"encoding/base64"
 	"fmt"
 	"log"
 	"time"
@@ -19,7 +20,8 @@ type ReceiverConfig struct {
 	ServerAddr     string
 	PlayerName     string
 	BufferMs       int
-	StaticDelayMs  int // optional static latency compensation (ms) applied to every scheduled play time
+	StaticDelayMs  int    // optional static latency compensation (ms) applied to every scheduled play time
+	PreferredCodec string // "pcm", "opus", or "flac" — reorders the advertised format list so the server picks this codec first
 	DeviceInfo     DeviceInfo
 	DecoderFactory func(audio.Format) (decode.Decoder, error)
 	OnMetadata     func(Metadata)
@@ -145,15 +147,7 @@ func (r *Receiver) Connect() error {
 			SoftwareVersion: r.config.DeviceInfo.SoftwareVersion,
 		},
 		PlayerV1Support: protocol.PlayerV1Support{
-			SupportedFormats: []protocol.AudioFormat{
-				{Codec: "pcm", Channels: 2, SampleRate: 192000, BitDepth: 24},
-				{Codec: "pcm", Channels: 2, SampleRate: 176400, BitDepth: 24},
-				{Codec: "pcm", Channels: 2, SampleRate: 96000, BitDepth: 24},
-				{Codec: "pcm", Channels: 2, SampleRate: 88200, BitDepth: 24},
-				{Codec: "pcm", Channels: 2, SampleRate: 48000, BitDepth: 16},
-				{Codec: "pcm", Channels: 2, SampleRate: 44100, BitDepth: 16},
-				{Codec: "opus", Channels: 2, SampleRate: 48000, BitDepth: 16},
-			},
+			SupportedFormats:  buildSupportedFormats(r.config.PreferredCodec),
 			BufferCapacity:    1048576,
 			SupportedCommands: []string{"volume", "mute"},
 		},
@@ -209,6 +203,15 @@ func (r *Receiver) handleStreamStart() {
 				SampleRate: start.Player.SampleRate,
 				Channels:   start.Player.Channels,
 				BitDepth:   start.Player.BitDepth,
+			}
+
+			if start.Player.CodecHeader != "" {
+				headerBytes, err := base64.StdEncoding.DecodeString(start.Player.CodecHeader)
+				if err != nil {
+					log.Printf("Failed to decode codec_header: %v", err)
+				} else {
+					format.CodecHeader = headerBytes
+				}
 			}
 
 			var decoder decode.Decoder
@@ -273,6 +276,9 @@ func (r *Receiver) handleAudioChunks() {
 			pcm, err := r.decoder.Decode(chunk.Data)
 			if err != nil {
 				r.notifyError(fmt.Errorf("decode error: %w", err))
+				continue
+			}
+			if len(pcm) == 0 {
 				continue
 			}
 
@@ -442,6 +448,41 @@ func (r *Receiver) clockSyncLoop() {
 			return
 		}
 	}
+}
+
+// buildSupportedFormats returns the player's advertised format list.
+// If preferredCodec is set, formats matching that codec are moved to
+// the front so the server is more likely to select them.
+func buildSupportedFormats(preferredCodec string) []protocol.AudioFormat {
+	allFormats := []protocol.AudioFormat{
+		{Codec: "pcm", Channels: 2, SampleRate: 192000, BitDepth: 24},
+		{Codec: "pcm", Channels: 2, SampleRate: 176400, BitDepth: 24},
+		{Codec: "pcm", Channels: 2, SampleRate: 96000, BitDepth: 24},
+		{Codec: "pcm", Channels: 2, SampleRate: 88200, BitDepth: 24},
+		{Codec: "pcm", Channels: 2, SampleRate: 48000, BitDepth: 16},
+		{Codec: "pcm", Channels: 2, SampleRate: 44100, BitDepth: 16},
+		{Codec: "flac", Channels: 2, SampleRate: 192000, BitDepth: 24},
+		{Codec: "flac", Channels: 2, SampleRate: 96000, BitDepth: 24},
+		{Codec: "flac", Channels: 2, SampleRate: 48000, BitDepth: 24},
+		{Codec: "flac", Channels: 2, SampleRate: 44100, BitDepth: 16},
+		{Codec: "opus", Channels: 2, SampleRate: 48000, BitDepth: 16},
+	}
+
+	if preferredCodec == "" {
+		return allFormats
+	}
+
+	// Move preferred codec formats to the front.
+	preferred := make([]protocol.AudioFormat, 0, len(allFormats))
+	rest := make([]protocol.AudioFormat, 0, len(allFormats))
+	for _, f := range allFormats {
+		if f.Codec == preferredCodec {
+			preferred = append(preferred, f)
+		} else {
+			rest = append(rest, f)
+		}
+	}
+	return append(preferred, rest...)
 }
 
 func (r *Receiver) notifyError(err error) {

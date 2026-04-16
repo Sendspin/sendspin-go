@@ -53,6 +53,10 @@ type PlayerConfig struct {
 	// Default 0 means no shift.
 	StaticDelayMs int
 
+	// PreferredCodec reorders the advertised format list so the server
+	// picks this codec first. Values: "pcm" (default), "opus", "flac".
+	PreferredCodec string
+
 	DeviceInfo DeviceInfo
 
 	OnMetadata func(Metadata)
@@ -189,6 +193,7 @@ func (p *Player) buildReceiver(addr string) (*Receiver, error) {
 		PlayerName:     p.config.PlayerName,
 		BufferMs:       p.config.BufferMs,
 		StaticDelayMs:  p.config.StaticDelayMs,
+		PreferredCodec: p.config.PreferredCodec,
 		DeviceInfo:     p.config.DeviceInfo,
 		DecoderFactory: p.config.DecoderFactory,
 		OnMetadata:     p.config.OnMetadata,
