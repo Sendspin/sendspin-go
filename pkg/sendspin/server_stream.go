@@ -7,8 +7,6 @@ import (
 	"log"
 	"time"
 
-	"github.com/Sendspin/sendspin-go/internal/server"
-	"github.com/Sendspin/sendspin-go/pkg/audio"
 	"github.com/Sendspin/sendspin-go/pkg/protocol"
 )
 
@@ -101,93 +99,6 @@ func (s *Server) generateAndSendChunk() {
 				log.Printf("Error sending audio to %s: %v", c.name, err)
 			}
 		}
-	}
-}
-
-func (s *Server) addClientToStream(c *ServerClient) {
-	codec := negotiateCodec(c, s.audioSource.SampleRate())
-
-	var opusEncoder *server.OpusEncoder
-	var resampler *audio.Resampler
-	sourceRate := s.audioSource.SampleRate()
-
-	switch codec {
-	case "opus":
-		// Opus requires 48kHz — create resampler if source rate differs
-		if sourceRate != 48000 {
-			resampler = audio.NewResampler(sourceRate, 48000, s.audioSource.Channels())
-			log.Printf("Created resampler: %dHz -> 48kHz for Opus (client: %s)", sourceRate, c.name)
-		}
-
-		opusChunkSamples := (48000 * ChunkDurationMs) / 1000
-		encoder, err := server.NewOpusEncoder(48000, s.audioSource.Channels(), opusChunkSamples)
-		if err != nil {
-			log.Printf("Failed to create Opus encoder for %s, falling back to PCM: %v", c.name, err)
-			codec = "pcm"
-			resampler = nil
-		} else {
-			opusEncoder = encoder
-		}
-	case "flac":
-		log.Printf("FLAC streaming not supported for %s, using PCM", c.name)
-		codec = "pcm"
-	}
-
-	c.mu.Lock()
-	c.codec = codec
-	c.opusEncoder = opusEncoder
-	c.resampler = resampler
-	c.mu.Unlock()
-
-	log.Printf("Added client %s with codec %s", c.name, codec)
-
-	// For Opus, report 48kHz to the client since that's what it will decode
-	// (the resampler runs server-side before encoding).
-	streamSampleRate := s.audioSource.SampleRate()
-	streamBitDepth := DefaultBitDepth
-	if codec == "opus" {
-		streamSampleRate = 48000
-		streamBitDepth = 16
-	}
-
-	streamStart := protocol.StreamStart{
-		Player: &protocol.StreamStartPlayer{
-			Codec:      codec,
-			SampleRate: streamSampleRate,
-			Channels:   s.audioSource.Channels(),
-			BitDepth:   streamBitDepth,
-		},
-	}
-
-	if err := c.Send("stream/start", streamStart); err != nil {
-		log.Printf("Error sending stream/start to %s: %v", c.name, err)
-	}
-
-	// server/state carries the initial metadata snapshot per spec.
-	title, artist, album := s.audioSource.Metadata()
-	serverState := protocol.ServerStateMessage{
-		Metadata: &protocol.MetadataState{
-			Timestamp: s.getClockMicros(),
-			Title:     strPtr(title),
-			Artist:    strPtr(artist),
-			Album:     strPtr(album),
-		},
-	}
-
-	if err := c.Send("server/state", serverState); err != nil {
-		log.Printf("Error sending server/state to %s: %v", c.name, err)
-	}
-
-	// group/update is required by spec even when we host a single implicit group.
-	groupID := s.serverID
-	playbackState := "playing"
-	groupUpdate := protocol.GroupUpdate{
-		GroupID:       &groupID,
-		PlaybackState: &playbackState,
-	}
-
-	if err := c.Send("group/update", groupUpdate); err != nil {
-		log.Printf("Error sending group/update to %s: %v", c.name, err)
 	}
 }
 
