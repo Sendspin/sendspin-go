@@ -84,6 +84,9 @@ type Group struct {
 	subs    map[int]chan Event
 	nextSub int
 	closed  bool
+
+	roles               map[string]GroupRole
+	roleDispatchStarted bool
 }
 
 // NewGroup constructs a Group with the given identifier. The ID is
