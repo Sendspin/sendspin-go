@@ -502,10 +502,15 @@ func (r *Receiver) notifyError(err error) {
 }
 
 func (r *Receiver) Close() error {
+	// Send goodbye BEFORE cancelling the context so the message
+	// reaches the server while the connection is still alive.
+	if r.client != nil {
+		r.client.SendGoodbye("shutdown")
+	}
+
 	r.cancel()
 
 	if r.client != nil {
-		r.client.SendGoodbye("shutdown")
 		r.client.Close()
 	}
 
