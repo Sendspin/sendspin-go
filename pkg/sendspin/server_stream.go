@@ -61,6 +61,7 @@ func (s *Server) generateAndSendChunk() {
 		c.mu.RLock()
 		codec := c.codec
 		opusEncoder := c.opusEncoder
+		flacEncoder := c.flacEncoder
 		resampler := c.resampler
 		c.mu.RUnlock()
 
@@ -81,6 +82,16 @@ func (s *Server) generateAndSendChunk() {
 				audioData, encodeErr = opusEncoder.Encode(samples16)
 				if encodeErr != nil {
 					log.Printf("Opus encode error for %s: %v", c.name, encodeErr)
+					continue
+				}
+			} else {
+				continue
+			}
+		case "flac":
+			if flacEncoder != nil {
+				audioData, encodeErr = flacEncoder.Encode(samples[:n])
+				if encodeErr != nil {
+					log.Printf("FLAC encode error for %s: %v", c.name, encodeErr)
 					continue
 				}
 			} else {
@@ -119,24 +130,25 @@ func (s *Server) notifyStreamEnd() {
 	}
 }
 
-// negotiateCodec picks PCM at the source's native rate when advertised
-// (lossless hi-res), then falls through to Opus for bandwidth savings, then
-// PCM as a last resort.
+// negotiateCodec picks the best codec by scanning the client's advertised
+// formats in order. The client controls preference (via --preferred-codec);
+// the server accepts the first codec it can handle.
+//
+// Supported: pcm (at source rate), flac, opus. Falls back to pcm.
 func negotiateCodec(c *ServerClient, sourceSampleRate int) string {
 	if c.capabilities == nil {
 		return "pcm"
 	}
 
-	sourceRate := sourceSampleRate
-
 	for _, format := range c.capabilities.SupportedFormats {
-		if format.Codec == "pcm" && format.SampleRate == sourceRate && format.BitDepth == DefaultBitDepth {
-			return "pcm"
-		}
-	}
-
-	for _, format := range c.capabilities.SupportedFormats {
-		if format.Codec == "opus" {
+		switch format.Codec {
+		case "pcm":
+			if format.SampleRate == sourceSampleRate && format.BitDepth == DefaultBitDepth {
+				return "pcm"
+			}
+		case "flac":
+			return "flac"
+		case "opus":
 			return "opus"
 		}
 	}
