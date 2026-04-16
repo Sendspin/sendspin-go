@@ -2,7 +2,7 @@
 # ABOUTME: Provides targets for building, testing, and cleaning binaries
 
 .PHONY: all build player server test test-verbose test-coverage lint clean install \
-	build-all build-linux build-darwin help conformance
+	build-all build-linux build-darwin help conformance install-daemon uninstall-daemon
 
 # Version from git tag or default
 VERSION ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo "dev")
@@ -81,6 +81,34 @@ build-darwin:
 	GOOS=darwin GOARCH=amd64 go build -ldflags "$(LDFLAGS)" -o bin/sendspin-server-darwin-amd64 ./cmd/sendspin-server
 	GOOS=darwin GOARCH=arm64 go build -ldflags "$(LDFLAGS)" -o bin/sendspin-server-darwin-arm64 ./cmd/sendspin-server
 
+# Install as a systemd daemon (Linux only, requires root)
+install-daemon: player
+	@echo "Installing sendspin-player daemon..."
+	install -m 755 sendspin-player /usr/local/bin/sendspin-player
+	install -m 644 dist/systemd/sendspin-player.service /etc/systemd/system/sendspin-player.service
+	@if [ ! -f /etc/default/sendspin-player ]; then \
+		install -m 644 dist/systemd/sendspin-player.env /etc/default/sendspin-player; \
+		echo "Created /etc/default/sendspin-player — edit this file to configure."; \
+	else \
+		echo "/etc/default/sendspin-player already exists, not overwriting."; \
+	fi
+	systemctl daemon-reload
+	@echo ""
+	@echo "Installed. To start:"
+	@echo "  sudo systemctl enable --now sendspin-player"
+	@echo ""
+	@echo "Configure via /etc/default/sendspin-player"
+
+# Uninstall the systemd daemon
+uninstall-daemon:
+	@echo "Removing sendspin-player daemon..."
+	-systemctl stop sendspin-player 2>/dev/null
+	-systemctl disable sendspin-player 2>/dev/null
+	rm -f /etc/systemd/system/sendspin-player.service
+	rm -f /usr/local/bin/sendspin-player
+	systemctl daemon-reload
+	@echo "Removed. /etc/default/sendspin-player left in place (manual cleanup if desired)."
+
 # Conformance test suite — runs the Sendspin protocol conformance harness
 # against the local sendspin-go checkout. Mirrors what CI does so contributors
 # and conformance maintainers can reproduce CI results locally.
@@ -130,6 +158,8 @@ help:
 	@echo "  make build-all    - Build all platforms"
 	@echo "  make build-linux  - Build Linux binaries"
 	@echo "  make build-darwin - Build macOS binaries"
+	@echo "  make install-daemon   - Install as systemd service (Linux, requires root)"
+	@echo "  make uninstall-daemon - Remove systemd service"
 	@echo "  make conformance  - Run protocol conformance suite (clones ../conformance on first run)"
 	@echo ""
 	@echo "Version: $(VERSION)"

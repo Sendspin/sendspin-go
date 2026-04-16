@@ -33,25 +33,32 @@ var (
 	productName   = flag.String("product-name", "", "Override the product name sent in device_info (default: compiled-in identity)")
 	manufacturer  = flag.String("manufacturer", "", "Override the manufacturer sent in device_info (default: compiled-in identity)")
 	noReconnect   = flag.Bool("no-reconnect", false, "Disable automatic reconnect on connection loss")
+	daemon        = flag.Bool("daemon", false, "Daemon mode: log to stdout only (journalctl-friendly), no TUI, no log file")
 )
 
 func main() {
 	flag.Parse()
 
-	// Use TUI if not explicitly disabled; -stream-logs is an alias for -no-tui
-	useTUI := !(*noTUI || *streamLogs)
+	// Use TUI if not explicitly disabled; -stream-logs and -daemon both imply -no-tui
+	useTUI := !(*noTUI || *streamLogs || *daemon)
 
-	f, err := os.OpenFile(*logFile, os.O_RDWR|os.O_CREATE|os.O_APPEND, 0600)
-	if err != nil {
-		log.Fatalf("error opening log file: %v", err)
-	}
-	defer func() { _ = f.Close() }()
-
-	if useTUI {
-		// Log to file only when TUI is running; otherwise the log would stomp the TUI
-		log.SetOutput(f)
+	if *daemon {
+		// Daemon mode: log to stdout only. systemd/journalctl captures stdout
+		// and adds its own timestamps, so we keep ours for grep-ability.
+		log.SetOutput(os.Stdout)
 	} else {
-		log.SetOutput(io.MultiWriter(os.Stdout, f))
+		f, err := os.OpenFile(*logFile, os.O_RDWR|os.O_CREATE|os.O_APPEND, 0600)
+		if err != nil {
+			log.Fatalf("error opening log file: %v", err)
+		}
+		defer func() { _ = f.Close() }()
+
+		if useTUI {
+			// Log to file only when TUI is running; otherwise the log would stomp the TUI
+			log.SetOutput(f)
+		} else {
+			log.SetOutput(io.MultiWriter(os.Stdout, f))
+		}
 	}
 
 	playerName := *name
@@ -68,8 +75,10 @@ func main() {
 	signal.Notify(sigChan, syscall.SIGINT, syscall.SIGTERM)
 
 	if !useTUI {
-		log.Printf("Starting Sendspin Player: %s", playerName)
-		log.Printf("TUI disabled - logging to file for debugging")
+		log.Printf("Starting Sendspin Player: %s (version %s)", playerName, version.Version)
+		if *daemon {
+			log.Printf("Daemon mode: logging to stdout only")
+		}
 	}
 
 	var tuiProg *tea.Program
@@ -77,6 +86,7 @@ func main() {
 
 	if useTUI {
 		volumeCtrl = ui.NewVolumeControl()
+		var err error
 		tuiProg, err = ui.Run(volumeCtrl)
 		if err != nil {
 			log.Fatalf("Failed to start TUI: %v", err)

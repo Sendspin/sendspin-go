@@ -1,0 +1,25 @@
+[Unit]
+Description=Sendspin Player
+Documentation=https://github.com/Sendspin/sendspin-go
+After=network-online.target sound.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+ExecStart=/usr/local/bin/sendspin-player --daemon
+Restart=on-failure
+RestartSec=5
+EnvironmentFile=-/etc/default/sendspin-player
+# Pass CLI flags via SENDSPIN_PLAYER_OPTS in the environment file.
+# ExecStart is overridden below to append them.
+ExecStart=
+ExecStart=/usr/local/bin/sendspin-player --daemon $SENDSPIN_PLAYER_OPTS
+
+# Hardening
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=read-only
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target
