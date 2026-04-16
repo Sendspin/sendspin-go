@@ -1,5 +1,5 @@
 // ABOUTME: Message dispatch for incoming client control frames
-// ABOUTME: Routes client/time, client/state, client/goodbye to handlers
+// ABOUTME: Routes client/time, client/state, client/goodbye, client/command to handlers
 package sendspin
 
 import (
@@ -23,6 +23,8 @@ func (s *Server) handleClientMessage(c *ServerClient, data []byte) {
 		s.handleClientState(c, msg.Payload)
 	case "client/goodbye":
 		s.handleClientGoodbye(c, msg.Payload)
+	case "client/command":
+		s.handleClientCommand(c, msg.Payload)
 	default:
 		if s.config.Debug {
 			log.Printf("Unknown message type: %s", msg.Type)
@@ -87,6 +89,29 @@ func (s *Server) handleClientState(c *ServerClient, payload interface{}) {
 			Volume: stateMsg.Player.Volume,
 			Muted:  stateMsg.Player.Muted,
 		})
+	}
+}
+
+func (s *Server) handleClientCommand(c *ServerClient, payload interface{}) {
+	data, err := json.Marshal(payload)
+	if err != nil {
+		log.Printf("Error marshaling client/command payload: %v", err)
+		return
+	}
+
+	// client/command payloads are role-keyed: {"controller": {...}, "player": {...}}
+	var rolePayloads map[string]json.RawMessage
+	if err := json.Unmarshal(data, &rolePayloads); err != nil {
+		log.Printf("Error unmarshaling client/command: %v", err)
+		return
+	}
+
+	for roleFamily, roleData := range rolePayloads {
+		if err := s.defaultGroup.RouteMessage(c, roleFamily, roleData); err != nil {
+			if s.config.Debug {
+				log.Printf("client/command routing error for role %s: %v", roleFamily, err)
+			}
+		}
 	}
 }
 

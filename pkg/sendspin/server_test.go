@@ -471,6 +471,93 @@ func TestServer_GroupReceivesEventsFromRealHandshake(t *testing.T) {
 	}
 }
 
+// TestServer_ControllerCommandEndToEnd exercises the full client/command
+// pipeline: Server + ControllerGroupRole + real WebSocket handshake +
+// client/command message → OnCommand callback fires.
+func TestServer_ControllerCommandEndToEnd(t *testing.T) {
+	commandReceived := make(chan string, 1)
+
+	server, err := NewServer(ServerConfig{
+		Port:   8934,
+		Name:   "Controller Test",
+		Source: NewTestTone(48000, 2),
+	})
+	if err != nil {
+		t.Fatalf("NewServer: %v", err)
+	}
+
+	ctrl := NewControllerRole(ControllerConfig{
+		SupportedCommands: []string{"next", "previous"},
+		OnCommand: func(c *ServerClient, command string) {
+			commandReceived <- command
+		},
+	})
+	server.Group().RegisterRole(ctrl)
+
+	errChan := make(chan error, 1)
+	go func() { errChan <- server.Start() }()
+	defer func() {
+		server.Stop()
+		select {
+		case <-errChan:
+		case <-time.After(5 * time.Second):
+			t.Error("server stop timeout")
+		}
+	}()
+
+	time.Sleep(200 * time.Millisecond)
+
+	conn, _, err := websocket.DefaultDialer.Dial("ws://localhost:8934/sendspin", nil)
+	if err != nil {
+		t.Fatalf("dial: %v", err)
+	}
+	defer conn.Close()
+
+	hello := protocol.Message{
+		Type: "client/hello",
+		Payload: protocol.ClientHello{
+			ClientID:       "ctrl-test-client",
+			Name:           "Controller Test Client",
+			Version:        1,
+			SupportedRoles: []string{"controller@v1"},
+		},
+	}
+	if err := conn.WriteJSON(hello); err != nil {
+		t.Fatalf("write hello: %v", err)
+	}
+
+	// Drain the server/hello response.
+	var msg protocol.Message
+	if err := conn.ReadJSON(&msg); err != nil {
+		t.Fatalf("read server/hello: %v", err)
+	}
+
+	// Give the join event time to dispatch to the controller role.
+	time.Sleep(100 * time.Millisecond)
+
+	// Send a controller command.
+	cmd := protocol.Message{
+		Type: "client/command",
+		Payload: map[string]interface{}{
+			"controller": map[string]interface{}{
+				"command": "next",
+			},
+		},
+	}
+	if err := conn.WriteJSON(cmd); err != nil {
+		t.Fatalf("write client/command: %v", err)
+	}
+
+	select {
+	case got := <-commandReceived:
+		if got != "next" {
+			t.Errorf("command = %q, want %q", got, "next")
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("timed out waiting for OnCommand callback")
+	}
+}
+
 func TestServerDuplicateClientID(t *testing.T) {
 	source := NewTestTone(48000, 2)
 
