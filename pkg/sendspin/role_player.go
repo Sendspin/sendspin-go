@@ -92,11 +92,18 @@ func (r *PlayerGroupRole) OnClientJoin(c *ServerClient) {
 		}
 	}
 
+	// Create buffer tracker from client's advertised buffer_capacity.
+	bufferCapacity := 1048576 // 1MB default
+	if c.capabilities != nil && c.capabilities.BufferCapacity > 0 {
+		bufferCapacity = c.capabilities.BufferCapacity
+	}
+
 	c.mu.Lock()
 	c.codec = codec
 	c.opusEncoder = opusEncoder
 	c.flacEncoder = flacEncoder
 	c.resampler = resampler
+	c.bufferTracker = NewBufferTracker(bufferCapacity)
 	c.mu.Unlock()
 
 	log.Printf("Added client %s with codec %s", c.Name(), codec)
