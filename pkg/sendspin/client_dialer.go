@@ -125,20 +125,28 @@ func (d *clientDialer) claim(instance string) bool {
 	return true
 }
 
-// release frees the instance slot. On success (dialErr == nil) it clears
-// any prior failure state; on error it records a consecutive failure and
-// schedules an exponentially-backed-off cooldown before the next retry.
+// release updates the instance slot after a dial attempt completes.
+// On success (dialErr == nil) the instance stays latched in the active
+// set — we never re-dial a successfully-connected instance. On error
+// it frees the slot and schedules an exponentially-backed-off cooldown
+// before the next retry.
 func (d *clientDialer) release(instance string, dialErr error) {
 	d.mu.Lock()
 	defer d.mu.Unlock()
-	delete(d.active, instance)
 
 	if dialErr == nil {
+		// Latch: keep active[instance] = true so future discovery
+		// events for this instance are silently ignored. The server
+		// already handled the connection; re-dialing would create a
+		// duplicate session.
 		delete(d.failures, instance)
 		delete(d.cooldown, instance)
 		return
 	}
 
+	// Dial failed — release the slot so the instance can be retried
+	// after the backoff period.
+	delete(d.active, instance)
 	d.failures[instance]++
 	backoff := d.baseBackoff * time.Duration(1<<(d.failures[instance]-1))
 	if backoff > d.maxBackoff || backoff <= 0 {
