@@ -18,15 +18,31 @@ func NewVolumeControl() *VolumeControl {
 	}
 }
 
-func NewModel(volCtrl *VolumeControl) Model {
-	return Model{
-		volume:     100,
-		state:      "idle",
-		volumeCtrl: volCtrl,
+type TransportMsg struct {
+	Command string // "play", "pause", "toggle", "next", "previous", "reconnect"
+}
+
+type TransportControl struct {
+	Commands chan TransportMsg
+}
+
+func NewTransportControl() *TransportControl {
+	return &TransportControl{
+		Commands: make(chan TransportMsg, 10),
 	}
 }
 
-func Run(volCtrl *VolumeControl) (*tea.Program, error) {
-	p := tea.NewProgram(NewModel(volCtrl), tea.WithAltScreen())
+func NewModel(volCtrl *VolumeControl, transportCtrl *TransportControl) Model {
+	return Model{
+		volume:        100,
+		state:         "idle",
+		playbackState: "idle",
+		volumeCtrl:    volCtrl,
+		transportCtrl: transportCtrl,
+	}
+}
+
+func Run(volCtrl *VolumeControl, transportCtrl *TransportControl) (*tea.Program, error) {
+	p := tea.NewProgram(NewModel(volCtrl, transportCtrl), tea.WithAltScreen())
 	return p, nil
 }

@@ -17,7 +17,6 @@ type Model struct {
 	serverName string
 
 	// Sync
-	syncOffset  int64
 	syncRTT     int64
 	syncQuality sync.Quality
 
@@ -34,9 +33,10 @@ type Model struct {
 	artworkPath string
 
 	// Playback
-	state  string
-	volume int
-	muted  bool
+	state         string
+	playbackState string // "playing", "paused", "stopped", "idle", "reconnecting"
+	volume        int
+	muted         bool
 
 	// Stats
 	received    int64
@@ -47,15 +47,14 @@ type Model struct {
 	// Debug
 	showDebug  bool
 	goroutines int
-	memAlloc   uint64
-	memSys     uint64
 
 	// Dimensions
 	width  int
 	height int
 
-	// Volume control channel
-	volumeCtrl *VolumeControl
+	// Controls
+	volumeCtrl    *VolumeControl
+	transportCtrl *TransportControl
 }
 
 func (m Model) Init() tea.Cmd {
@@ -102,16 +101,14 @@ func (m Model) renderHeader() string {
 		connStatus = fmt.Sprintf("Connected to %s", m.serverName)
 	}
 
-	syncIcon := "✗"
-	syncText := "Lost"
+	stateDisplay := playbackStateDisplay(m.playbackState)
+
+	syncDisplay := "Sync: \u2717 Lost"
 	switch m.syncQuality {
 	case sync.QualityGood:
-		syncIcon = "✓"
-		syncText = fmt.Sprintf("Synced (offset: %+.1fms, jitter: %.1fms)",
-			float64(m.syncOffset)/1000.0, float64(m.syncRTT)/1000.0)
+		syncDisplay = fmt.Sprintf("Sync: \u2713 Good (RTT: %.1fms)", float64(m.syncRTT)/1000.0)
 	case sync.QualityDegraded:
-		syncIcon = "⚠"
-		syncText = "Degraded"
+		syncDisplay = "Sync: \u26a0 Degraded"
 	}
 
 	// Use terminal width for responsive layout
@@ -122,13 +119,19 @@ func (m Model) renderHeader() string {
 	innerWidth := width - 4 // Account for borders
 
 	titleWidth := width - 20 // Space for "┌─ Sendspin Player " prefix
-	title := "┌─ Sendspin Player " + repeatString("─", titleWidth) + "┐\n"
+	title := "\u250c\u2500 Sendspin Player " + repeatString("\u2500", titleWidth) + "\u2510\n"
 
-	statusLine := fmt.Sprintf("│ Status: %-*s │\n", innerWidth-9, truncate(connStatus, innerWidth-9))
-	syncLine := fmt.Sprintf("│ Sync:   %s %-*s │\n", syncIcon, innerWidth-11, truncate(syncText, innerWidth-11))
-	separator := "├" + repeatString("─", width-2) + "┤\n"
+	statusLine := fmt.Sprintf("\u2502 Status: %-*s \u2502\n", innerWidth-9, truncate(connStatus, innerWidth-9))
 
-	return title + statusLine + syncLine + separator
+	// State + Sync on same line
+	statePrefix := fmt.Sprintf("State:  %s", stateDisplay)
+	// Calculate available space: innerWidth minus "State:  <state>" minus spacing minus sync display
+	stateSyncLine := fmt.Sprintf("\u2502 %-*s \u2502\n", innerWidth,
+		fmt.Sprintf("%-30s %s", statePrefix, syncDisplay))
+
+	separator := "\u251c" + repeatString("\u2500", width-2) + "\u2524\n"
+
+	return title + statusLine + stateSyncLine + separator
 }
 
 func (m Model) renderStreamInfo() string {
@@ -139,26 +142,25 @@ func (m Model) renderStreamInfo() string {
 	innerWidth := width - 4
 
 	if !m.connected || m.codec == "" {
-		return fmt.Sprintf("│ %-*s │\n", innerWidth, "No stream")
+		return fmt.Sprintf("\u2502 %-*s \u2502\n", innerWidth, "No stream")
 	}
 
-	s := fmt.Sprintf("│ %-*s │\n", innerWidth, "Now Playing:")
+	s := fmt.Sprintf("\u2502 %-*s \u2502\n", innerWidth, "Now Playing:")
 	if m.title != "" {
 		metaWidth := innerWidth - 10 // Account for "  Track:  " prefix
-		s += fmt.Sprintf("│   Track:  %-*s │\n", innerWidth-10, truncate(m.title, metaWidth))
-		s += fmt.Sprintf("│   Artist: %-*s │\n", innerWidth-10, truncate(m.artist, metaWidth))
-		s += fmt.Sprintf("│   Album:  %-*s │\n", innerWidth-10, truncate(m.album, metaWidth))
+		s += fmt.Sprintf("\u2502   Track:  %-*s \u2502\n", innerWidth-10, truncate(m.title, metaWidth))
+		s += fmt.Sprintf("\u2502   Artist: %-*s \u2502\n", innerWidth-10, truncate(m.artist, metaWidth))
+		s += fmt.Sprintf("\u2502   Album:  %-*s \u2502\n", innerWidth-10, truncate(m.album, metaWidth))
 		if m.artworkPath != "" {
-			s += fmt.Sprintf("│   Art:    %-*s │\n", innerWidth-10, truncate(m.artworkPath, metaWidth))
+			s += fmt.Sprintf("\u2502   Art:    %-*s \u2502\n", innerWidth-10, truncate(m.artworkPath, metaWidth))
 		}
 	} else {
-		s += fmt.Sprintf("│   %-*s │\n", innerWidth-3, "(No metadata)")
+		s += fmt.Sprintf("\u2502   %-*s \u2502\n", innerWidth-3, "(No metadata)")
 	}
 
-	s += fmt.Sprintf("│ %-*s │\n", innerWidth, "")
-	formatStr := fmt.Sprintf("Format: %s %dHz %s %d-bit",
-		m.codec, m.sampleRate, channelName(m.channels), m.bitDepth)
-	s += fmt.Sprintf("│ %-*s │\n", innerWidth, formatStr)
+	s += fmt.Sprintf("\u2502 %-*s \u2502\n", innerWidth, "")
+	formatStr := formatCodecDisplay(m.codec, m.sampleRate, m.bitDepth)
+	s += fmt.Sprintf("\u2502 %-*s \u2502\n", innerWidth, formatStr)
 
 	return s
 }
@@ -172,17 +174,17 @@ func (m Model) renderControls() string {
 
 	muteIcon := ""
 	if m.muted {
-		muteIcon = " 🔇"
+		muteIcon = " \U0001f507"
 	}
 
-	volumeBar := renderBar(m.volume, 100, 10)
+	volumeBar := renderBar(m.volume, 100, 20)
 
-	s := fmt.Sprintf("│ %-*s │\n", innerWidth, "")
+	s := fmt.Sprintf("\u2502 %-*s \u2502\n", innerWidth, "")
 	volumeStr := fmt.Sprintf("Volume: [%s] %d%%%s", volumeBar, m.volume, muteIcon)
-	s += fmt.Sprintf("│ %-*s │\n", innerWidth, volumeStr)
+	s += fmt.Sprintf("\u2502 %-*s \u2502\n", innerWidth, volumeStr)
 
-	bufferStr := fmt.Sprintf("Buffer: %dms (%d chunks)", m.bufferDepth, m.bufferDepth/10)
-	s += fmt.Sprintf("│ %-*s │\n", innerWidth, bufferStr)
+	bufferStr := fmt.Sprintf("Buffer: %dms", m.bufferDepth)
+	s += fmt.Sprintf("\u2502 %-*s \u2502\n", innerWidth, bufferStr)
 
 	return s
 }
@@ -194,10 +196,10 @@ func (m Model) renderStats() string {
 	}
 	innerWidth := width - 4
 
-	separator := "├" + repeatString("─", width-2) + "┤\n"
+	separator := "\u251c" + repeatString("\u2500", width-2) + "\u2524\n"
 	statsStr := fmt.Sprintf("Stats:  RX: %d  Played: %d  Dropped: %d", m.received, m.played, m.dropped)
-	statsLine := fmt.Sprintf("│ %-*s │\n", innerWidth, statsStr)
-	emptyLine := fmt.Sprintf("│ %-*s │\n", innerWidth, "")
+	statsLine := fmt.Sprintf("\u2502 %-*s \u2502\n", innerWidth, statsStr)
+	emptyLine := fmt.Sprintf("\u2502 %-*s \u2502\n", innerWidth, "")
 
 	return separator + statsLine + emptyLine
 }
@@ -209,9 +211,9 @@ func (m Model) renderHelp() string {
 	}
 	innerWidth := width - 4
 
-	helpStr := "↑/↓:Volume  m:Mute  r:Reconnect  d:Debug  q:Quit"
-	helpLine := fmt.Sprintf("│ %-*s │\n", innerWidth, helpStr)
-	bottom := "└" + repeatString("─", width-2) + "┘\n"
+	helpStr := "Space:Play/Pause  n:Next  p:Prev  \u2191/\u2193:Vol  m:Mute  q:Quit"
+	helpLine := fmt.Sprintf("\u2502 %-*s \u2502\n", innerWidth, helpStr)
+	bottom := "\u2514" + repeatString("\u2500", width-2) + "\u2518\n"
 
 	return helpLine + bottom
 }
@@ -223,18 +225,15 @@ func (m Model) renderDebug() string {
 	}
 	innerWidth := width - 4
 
-	memAllocMB := float64(m.memAlloc) / 1024 / 1024
-	memSysMB := float64(m.memSys) / 1024 / 1024
-
-	debugTitle := fmt.Sprintf("│ %-*s │\n", innerWidth, "DEBUG:")
+	debugTitle := fmt.Sprintf("\u2502 %-*s \u2502\n", innerWidth, "DEBUG:")
 	goroutineStr := fmt.Sprintf("  Goroutines: %d", m.goroutines)
-	goroutineLine := fmt.Sprintf("│ %-*s │\n", innerWidth, goroutineStr)
-	memStr := fmt.Sprintf("  Memory: %.1f MB / %.1f MB", memAllocMB, memSysMB)
-	memLine := fmt.Sprintf("│ %-*s │\n", innerWidth, memStr)
-	clockStr := fmt.Sprintf("  Clock Offset: %+dμs", m.syncOffset)
-	clockLine := fmt.Sprintf("│ %-*s │\n", innerWidth, clockStr)
+	goroutineLine := fmt.Sprintf("\u2502 %-*s \u2502\n", innerWidth, goroutineStr)
+	playbackStr := fmt.Sprintf("  Playback: %s", m.playbackState)
+	playbackLine := fmt.Sprintf("\u2502 %-*s \u2502\n", innerWidth, playbackStr)
+	codecStr := fmt.Sprintf("  Preferred codec: %s", m.codec)
+	codecLine := fmt.Sprintf("\u2502 %-*s \u2502\n", innerWidth, codecStr)
 
-	return debugTitle + goroutineLine + memLine + clockLine
+	return debugTitle + goroutineLine + playbackLine + codecLine
 }
 
 func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
@@ -286,6 +285,34 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 				// Channel full, skip
 			}
 		}
+	case " ":
+		if m.transportCtrl != nil {
+			select {
+			case m.transportCtrl.Commands <- TransportMsg{Command: "toggle"}:
+			default:
+			}
+		}
+	case "n":
+		if m.transportCtrl != nil {
+			select {
+			case m.transportCtrl.Commands <- TransportMsg{Command: "next"}:
+			default:
+			}
+		}
+	case "p":
+		if m.transportCtrl != nil {
+			select {
+			case m.transportCtrl.Commands <- TransportMsg{Command: "previous"}:
+			default:
+			}
+		}
+	case "r":
+		if m.transportCtrl != nil {
+			select {
+			case m.transportCtrl.Commands <- TransportMsg{Command: "reconnect"}:
+			default:
+			}
+		}
 	case "d":
 		m.showDebug = !m.showDebug
 	}
@@ -300,9 +327,11 @@ func (m *Model) applyStatus(msg StatusMsg) {
 	if msg.ServerName != "" {
 		m.serverName = msg.ServerName
 	}
-	// Sync stats are always applied when sent (offset can be 0 for perfect sync)
-	if msg.SyncOffset != 0 || msg.SyncRTT != 0 {
-		m.syncOffset = msg.SyncOffset
+	if msg.PlaybackState != "" {
+		m.playbackState = msg.PlaybackState
+	}
+	// Sync stats are always applied when sent
+	if msg.SyncRTT != 0 {
 		m.syncRTT = msg.SyncRTT
 		m.syncQuality = msg.SyncQuality
 	}
@@ -331,32 +360,28 @@ func (m *Model) applyStatus(msg StatusMsg) {
 	m.dropped = msg.Dropped
 	m.bufferDepth = msg.BufferDepth
 	m.goroutines = msg.Goroutines
-	m.memAlloc = msg.MemAlloc
-	m.memSys = msg.MemSys
 }
 
 type StatusMsg struct {
-	Connected   *bool
-	ServerName  string
-	SyncOffset  int64
-	SyncRTT     int64
-	SyncQuality sync.Quality
-	Codec       string
-	SampleRate  int
-	Channels    int
-	BitDepth    int
-	Title       string
-	Artist      string
-	Album       string
-	ArtworkPath string
-	Volume      int
-	Received    int64
-	Played      int64
-	Dropped     int64
-	BufferDepth int
-	Goroutines  int
-	MemAlloc    uint64
-	MemSys      uint64
+	Connected     *bool
+	ServerName    string
+	PlaybackState string
+	SyncRTT       int64
+	SyncQuality   sync.Quality
+	Codec         string
+	SampleRate    int
+	Channels      int
+	BitDepth      int
+	Title         string
+	Artist        string
+	Album         string
+	ArtworkPath   string
+	Volume        int
+	Received      int64
+	Played        int64
+	Dropped       int64
+	BufferDepth   int
+	Goroutines    int
 }
 
 type VolumeChangeMsg struct {
@@ -368,7 +393,7 @@ type QuitMsg struct{}
 
 func renderBar(value, max, width int) string {
 	filled := (value * width) / max
-	return strings.Repeat("█", filled) + strings.Repeat("░", width-filled)
+	return strings.Repeat("\u2588", filled) + strings.Repeat("\u2591", width-filled)
 }
 
 func truncate(s string, length int) string {
@@ -390,4 +415,62 @@ func repeatString(s string, count int) string {
 		return ""
 	}
 	return strings.Repeat(s, count)
+}
+
+// playbackStateDisplay returns a display string with icon for the given playback state.
+func playbackStateDisplay(state string) string {
+	switch state {
+	case "playing":
+		return "\u25b6 Playing"
+	case "paused":
+		return "\u23f8 Paused"
+	case "stopped":
+		return "\u23f9 Stopped"
+	case "idle":
+		return "\u25cf Idle"
+	case "reconnecting":
+		return "\u21bb Reconnecting..."
+	default:
+		return "\u25cf Idle"
+	}
+}
+
+// formatSampleRate returns a human-friendly sample rate string.
+func formatSampleRate(rate int) string {
+	switch rate {
+	case 44100:
+		return "44.1kHz"
+	case 48000:
+		return "48kHz"
+	case 88200:
+		return "88.2kHz"
+	case 96000:
+		return "96kHz"
+	case 176400:
+		return "176.4kHz"
+	case 192000:
+		return "192kHz"
+	default:
+		if rate%1000 == 0 {
+			return fmt.Sprintf("%dkHz", rate/1000)
+		}
+		return fmt.Sprintf("%.1fkHz", float64(rate)/1000.0)
+	}
+}
+
+// formatCodecDisplay returns a rich codec description string.
+func formatCodecDisplay(codec string, sampleRate, bitDepth int) string {
+	rate := formatSampleRate(sampleRate)
+	upper := strings.ToUpper(codec)
+
+	switch strings.ToLower(codec) {
+	case "pcm":
+		return fmt.Sprintf("%s %s/%dbit lossless", upper, rate, bitDepth)
+	case "flac":
+		return fmt.Sprintf("%s %s/%dbit lossless", upper, rate, bitDepth)
+	case "opus":
+		return fmt.Sprintf("%s %s/%dbit", upper, rate, bitDepth)
+	default:
+		return fmt.Sprintf("%s %s/%dbit", upper, rate, bitDepth)
+	}
 }

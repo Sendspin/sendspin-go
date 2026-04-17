@@ -6,10 +6,11 @@ import (
 	"testing"
 
 	"github.com/Sendspin/sendspin-go/pkg/sync"
+	tea "github.com/charmbracelet/bubbletea"
 )
 
 func TestNewModel(t *testing.T) {
-	model := NewModel(nil) // VolumeControl is optional for testing
+	model := NewModel(nil, nil) // VolumeControl and TransportControl are optional for testing
 
 	// Check initial state
 	if model.connected {
@@ -27,10 +28,14 @@ func TestNewModel(t *testing.T) {
 	if model.showDebug {
 		t.Error("expected showDebug to be false initially")
 	}
+
+	if model.playbackState != "idle" {
+		t.Errorf("expected playbackState 'idle', got '%s'", model.playbackState)
+	}
 }
 
 func TestStatusMsgConnected(t *testing.T) {
-	model := NewModel(nil)
+	model := NewModel(nil, nil)
 
 	connected := true
 	msg := StatusMsg{
@@ -50,7 +55,7 @@ func TestStatusMsgConnected(t *testing.T) {
 }
 
 func TestStatusMsgDisconnected(t *testing.T) {
-	model := NewModel(nil)
+	model := NewModel(nil, nil)
 
 	// First connect
 	connected := true
@@ -66,7 +71,7 @@ func TestStatusMsgDisconnected(t *testing.T) {
 }
 
 func TestStatusMsgSyncStats(t *testing.T) {
-	model := NewModel(nil)
+	model := NewModel(nil, nil)
 
 	msg := StatusMsg{
 		SyncRTT:     5000,
@@ -85,7 +90,7 @@ func TestStatusMsgSyncStats(t *testing.T) {
 }
 
 func TestStatusMsgStreamInfo(t *testing.T) {
-	model := NewModel(nil)
+	model := NewModel(nil, nil)
 
 	msg := StatusMsg{
 		Codec:      "opus",
@@ -114,7 +119,7 @@ func TestStatusMsgStreamInfo(t *testing.T) {
 }
 
 func TestStatusMsgMetadata(t *testing.T) {
-	model := NewModel(nil)
+	model := NewModel(nil, nil)
 
 	msg := StatusMsg{
 		Title:  "Test Song",
@@ -138,7 +143,7 @@ func TestStatusMsgMetadata(t *testing.T) {
 }
 
 func TestStatusMsgArtworkPath(t *testing.T) {
-	model := NewModel(nil)
+	model := NewModel(nil, nil)
 
 	msg := StatusMsg{
 		ArtworkPath: "/tmp/artwork.jpg",
@@ -152,7 +157,7 @@ func TestStatusMsgArtworkPath(t *testing.T) {
 }
 
 func TestStatusMsgVolume(t *testing.T) {
-	model := NewModel(nil)
+	model := NewModel(nil, nil)
 
 	msg := StatusMsg{
 		Volume: 75,
@@ -166,7 +171,7 @@ func TestStatusMsgVolume(t *testing.T) {
 }
 
 func TestStatusMsgStats(t *testing.T) {
-	model := NewModel(nil)
+	model := NewModel(nil, nil)
 
 	msg := StatusMsg{
 		Received:    1000,
@@ -195,12 +200,10 @@ func TestStatusMsgStats(t *testing.T) {
 }
 
 func TestStatusMsgRuntimeStats(t *testing.T) {
-	model := NewModel(nil)
+	model := NewModel(nil, nil)
 
 	msg := StatusMsg{
 		Goroutines: 42,
-		MemAlloc:   1024 * 1024,
-		MemSys:     2048 * 1024,
 	}
 
 	model.applyStatus(msg)
@@ -208,18 +211,10 @@ func TestStatusMsgRuntimeStats(t *testing.T) {
 	if model.goroutines != 42 {
 		t.Errorf("expected goroutines 42, got %d", model.goroutines)
 	}
-
-	if model.memAlloc != 1024*1024 {
-		t.Errorf("expected memAlloc %d, got %d", 1024*1024, model.memAlloc)
-	}
-
-	if model.memSys != 2048*1024 {
-		t.Errorf("expected memSys %d, got %d", 2048*1024, model.memSys)
-	}
 }
 
 func TestMultipleStatusUpdates(t *testing.T) {
-	model := NewModel(nil)
+	model := NewModel(nil, nil)
 
 	// First update
 	connected := true
@@ -249,7 +244,7 @@ func TestMultipleStatusUpdates(t *testing.T) {
 }
 
 func TestStatusMsgZeroValues(t *testing.T) {
-	model := NewModel(nil)
+	model := NewModel(nil, nil)
 
 	// Set some non-zero values first
 	model.applyStatus(StatusMsg{
@@ -322,10 +317,10 @@ func TestChannelNameFunction(t *testing.T) {
 }
 
 func TestSyncQualityDisplay(t *testing.T) {
-	model := NewModel(nil)
+	model := NewModel(nil, nil)
 
 	// Test different quality levels
-	// Note: quality is only applied when SyncRTT or SyncOffset is non-zero
+	// Note: quality is only applied when SyncRTT is non-zero
 	qualities := []sync.Quality{
 		sync.QualityGood,
 		sync.QualityDegraded,
@@ -345,7 +340,7 @@ func TestSyncQualityDisplay(t *testing.T) {
 }
 
 func TestMetadataClearing(t *testing.T) {
-	model := NewModel(nil)
+	model := NewModel(nil, nil)
 
 	// Set metadata
 	model.applyStatus(StatusMsg{
@@ -365,6 +360,200 @@ func TestMetadataClearing(t *testing.T) {
 	if model.title != "Song" {
 		t.Error("title should not be cleared by empty string")
 	}
+}
+
+func TestPlaybackStateApplication(t *testing.T) {
+	model := NewModel(nil, nil)
+
+	// Initial state should be idle
+	if model.playbackState != "idle" {
+		t.Errorf("expected initial playbackState 'idle', got '%s'", model.playbackState)
+	}
+
+	// Apply playing state
+	model.applyStatus(StatusMsg{PlaybackState: "playing"})
+	if model.playbackState != "playing" {
+		t.Errorf("expected playbackState 'playing', got '%s'", model.playbackState)
+	}
+
+	// Apply paused state
+	model.applyStatus(StatusMsg{PlaybackState: "paused"})
+	if model.playbackState != "paused" {
+		t.Errorf("expected playbackState 'paused', got '%s'", model.playbackState)
+	}
+
+	// Empty string should not overwrite
+	model.applyStatus(StatusMsg{PlaybackState: ""})
+	if model.playbackState != "paused" {
+		t.Errorf("expected playbackState to remain 'paused', got '%s'", model.playbackState)
+	}
+}
+
+func TestTransportKeyToggle(t *testing.T) {
+	tc := NewTransportControl()
+	model := NewModel(nil, tc)
+	model.width = 80
+	model.height = 24
+
+	// Simulate space key
+	msg := fakeKeyMsg(" ")
+	model.handleKey(msg)
+
+	select {
+	case cmd := <-tc.Commands:
+		if cmd.Command != "toggle" {
+			t.Errorf("expected 'toggle' command, got '%s'", cmd.Command)
+		}
+	default:
+		t.Error("expected toggle command on transport channel")
+	}
+}
+
+func TestTransportKeyNext(t *testing.T) {
+	tc := NewTransportControl()
+	model := NewModel(nil, tc)
+	model.width = 80
+	model.height = 24
+
+	msg := fakeKeyMsg("n")
+	model.handleKey(msg)
+
+	select {
+	case cmd := <-tc.Commands:
+		if cmd.Command != "next" {
+			t.Errorf("expected 'next' command, got '%s'", cmd.Command)
+		}
+	default:
+		t.Error("expected next command on transport channel")
+	}
+}
+
+func TestTransportKeyPrevious(t *testing.T) {
+	tc := NewTransportControl()
+	model := NewModel(nil, tc)
+	model.width = 80
+	model.height = 24
+
+	msg := fakeKeyMsg("p")
+	model.handleKey(msg)
+
+	select {
+	case cmd := <-tc.Commands:
+		if cmd.Command != "previous" {
+			t.Errorf("expected 'previous' command, got '%s'", cmd.Command)
+		}
+	default:
+		t.Error("expected previous command on transport channel")
+	}
+}
+
+func TestTransportKeyReconnect(t *testing.T) {
+	tc := NewTransportControl()
+	model := NewModel(nil, tc)
+	model.width = 80
+	model.height = 24
+
+	msg := fakeKeyMsg("r")
+	model.handleKey(msg)
+
+	select {
+	case cmd := <-tc.Commands:
+		if cmd.Command != "reconnect" {
+			t.Errorf("expected 'reconnect' command, got '%s'", cmd.Command)
+		}
+	default:
+		t.Error("expected reconnect command on transport channel")
+	}
+}
+
+func TestTransportNilSafe(t *testing.T) {
+	// Transport keys should not panic when transportCtrl is nil
+	model := NewModel(nil, nil)
+	model.width = 80
+	model.height = 24
+
+	// These should not panic
+	model.handleKey(fakeKeyMsg(" "))
+	model.handleKey(fakeKeyMsg("n"))
+	model.handleKey(fakeKeyMsg("p"))
+	model.handleKey(fakeKeyMsg("r"))
+}
+
+func TestPlaybackStateDisplay(t *testing.T) {
+	tests := []struct {
+		state    string
+		expected string
+	}{
+		{"playing", "\u25b6 Playing"},
+		{"paused", "\u23f8 Paused"},
+		{"stopped", "\u23f9 Stopped"},
+		{"idle", "\u25cf Idle"},
+		{"reconnecting", "\u21bb Reconnecting..."},
+		{"unknown", "\u25cf Idle"},
+	}
+
+	for _, tt := range tests {
+		result := playbackStateDisplay(tt.state)
+		if result != tt.expected {
+			t.Errorf("playbackStateDisplay(%q) = %q, expected %q",
+				tt.state, result, tt.expected)
+		}
+	}
+}
+
+func TestFormatSampleRate(t *testing.T) {
+	tests := []struct {
+		rate     int
+		expected string
+	}{
+		{44100, "44.1kHz"},
+		{48000, "48kHz"},
+		{96000, "96kHz"},
+		{192000, "192kHz"},
+		{88200, "88.2kHz"},
+		{176400, "176.4kHz"},
+		{32000, "32kHz"},
+		{22050, "22.1kHz"},
+	}
+
+	for _, tt := range tests {
+		result := formatSampleRate(tt.rate)
+		if result != tt.expected {
+			t.Errorf("formatSampleRate(%d) = %q, expected %q",
+				tt.rate, result, tt.expected)
+		}
+	}
+}
+
+func TestFormatCodecDisplay(t *testing.T) {
+	tests := []struct {
+		codec      string
+		sampleRate int
+		bitDepth   int
+		expected   string
+	}{
+		{"pcm", 192000, 24, "PCM 192kHz/24bit lossless"},
+		{"opus", 48000, 16, "OPUS 48kHz/16bit"},
+		{"flac", 48000, 24, "FLAC 48kHz/24bit lossless"},
+		{"flac", 44100, 16, "FLAC 44.1kHz/16bit lossless"},
+		{"aac", 44100, 16, "AAC 44.1kHz/16bit"},
+	}
+
+	for _, tt := range tests {
+		result := formatCodecDisplay(tt.codec, tt.sampleRate, tt.bitDepth)
+		if result != tt.expected {
+			t.Errorf("formatCodecDisplay(%q, %d, %d) = %q, expected %q",
+				tt.codec, tt.sampleRate, tt.bitDepth, result, tt.expected)
+		}
+	}
+}
+
+// fakeKeyMsg creates a tea.KeyMsg for testing.
+func fakeKeyMsg(key string) tea.KeyMsg {
+	if key == " " {
+		return tea.KeyMsg{Type: tea.KeySpace, Runes: []rune(key)}
+	}
+	return tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune(key)}
 }
 
 // NOTE: TestConcurrentStatusUpdates was removed because Bubble Tea

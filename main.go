@@ -85,11 +85,13 @@ func main() {
 
 	var tuiProg *tea.Program
 	var volumeCtrl *ui.VolumeControl
+	var transportCtrl *ui.TransportControl
 
 	if useTUI {
 		volumeCtrl = ui.NewVolumeControl()
+		transportCtrl = ui.NewTransportControl()
 		var err error
-		tuiProg, err = ui.Run(volumeCtrl)
+		tuiProg, err = ui.Run(volumeCtrl, transportCtrl)
 		if err != nil {
 			log.Fatalf("Failed to start TUI: %v", err)
 		}
@@ -150,10 +152,11 @@ func main() {
 		},
 		OnStateChange: func(state sendspin.PlayerState) {
 			updateTUI(ui.StatusMsg{
-				Codec:      state.Codec,
-				SampleRate: state.SampleRate,
-				Channels:   state.Channels,
-				BitDepth:   state.BitDepth,
+				Codec:         state.Codec,
+				SampleRate:    state.SampleRate,
+				Channels:      state.Channels,
+				BitDepth:      state.BitDepth,
+				PlaybackState: state.State,
 			})
 			connected := state.Connected
 			serverLabel := serverAddress
@@ -211,6 +214,10 @@ func main() {
 		go handleVolumeControl(player, volumeCtrl)
 	}
 
+	if transportCtrl != nil {
+		go handleTransportControl(player, transportCtrl)
+	}
+
 	if tuiProg != nil {
 		go statsUpdateLoop(player, updateTUI)
 	}
@@ -247,6 +254,37 @@ func handleVolumeControl(player *sendspin.Player, volumeCtrl *ui.VolumeControl) 
 	}
 }
 
+func handleTransportControl(player *sendspin.Player, ctrl *ui.TransportControl) {
+	for cmd := range ctrl.Commands {
+		switch cmd.Command {
+		case "toggle":
+			status := player.Status()
+			if status.State == "playing" {
+				player.Pause()
+			} else {
+				player.Play()
+			}
+		case "play":
+			player.Play()
+		case "pause":
+			player.Pause()
+		case "next":
+			if player.Status().Connected {
+				// TODO: wire to SendCommand when Player API exposes it
+				log.Printf("Next track requested")
+			}
+		case "previous":
+			if player.Status().Connected {
+				// TODO: wire to SendCommand when Player API exposes it
+				log.Printf("Previous track requested")
+			}
+		case "reconnect":
+			// TODO: add Player.Reconnect() method; auto-reconnect (#38) handles network drops
+			log.Printf("Manual reconnect requested")
+		}
+	}
+}
+
 func statsUpdateLoop(player *sendspin.Player, updateTUI func(ui.StatusMsg)) {
 	ticker := time.NewTicker(500 * time.Millisecond)
 	defer ticker.Stop()
@@ -263,8 +301,6 @@ func statsUpdateLoop(player *sendspin.Player, updateTUI func(ui.StatusMsg)) {
 			SyncRTT:     stats.SyncRTT,
 			SyncQuality: stats.SyncQuality,
 			Goroutines:  runtime.NumGoroutine(),
-			MemAlloc:    0,
-			MemSys:      0,
 		})
 	}
 }
