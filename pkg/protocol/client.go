@@ -319,7 +319,7 @@ func (c *Client) buildSupportedRoles() []string {
 	if len(c.config.SupportedRoles) > 0 {
 		return c.config.SupportedRoles
 	}
-	roles := []string{"player@v1", "metadata@v1"}
+	roles := []string{"player@v1", "metadata@v1", "controller@v1"}
 	if c.config.ArtworkV1Support != nil {
 		roles = append(roles, "artwork@v1")
 	}

@@ -256,31 +256,34 @@ func handleVolumeControl(player *sendspin.Player, volumeCtrl *ui.VolumeControl) 
 
 func handleTransportControl(player *sendspin.Player, ctrl *ui.TransportControl) {
 	for cmd := range ctrl.Commands {
+		if !player.Status().Connected {
+			log.Printf("Transport command %q ignored: not connected", cmd.Command)
+			continue
+		}
+		var err error
 		switch cmd.Command {
 		case "toggle":
+			// Toggle sends "pause" if server is playing, "play" otherwise.
+			// The server decides the actual state; we just request it.
 			status := player.Status()
 			if status.State == "playing" {
-				player.Pause()
+				err = player.SendCommand("pause")
 			} else {
-				player.Play()
+				err = player.SendCommand("play")
 			}
 		case "play":
-			player.Play()
+			err = player.SendCommand("play")
 		case "pause":
-			player.Pause()
+			err = player.SendCommand("pause")
 		case "next":
-			if player.Status().Connected {
-				// TODO: wire to SendCommand when Player API exposes it
-				log.Printf("Next track requested")
-			}
+			err = player.SendCommand("next")
 		case "previous":
-			if player.Status().Connected {
-				// TODO: wire to SendCommand when Player API exposes it
-				log.Printf("Previous track requested")
-			}
+			err = player.SendCommand("previous")
 		case "reconnect":
-			// TODO: add Player.Reconnect() method; auto-reconnect (#38) handles network drops
 			log.Printf("Manual reconnect requested")
+		}
+		if err != nil {
+			log.Printf("Transport command %q failed: %v", cmd.Command, err)
 		}
 	}
 }
