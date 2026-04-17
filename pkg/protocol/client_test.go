@@ -157,19 +157,19 @@ func TestBuildSupportedRoles_Default(t *testing.T) {
 		want   []string
 	}{
 		{
-			name:   "bare default is player+metadata",
+			name:   "bare default is player+metadata+controller",
 			config: Config{},
-			want:   []string{"player@v1", "metadata@v1"},
+			want:   []string{"player@v1", "metadata@v1", "controller@v1"},
 		},
 		{
 			name:   "artwork support adds artwork@v1",
 			config: Config{ArtworkV1Support: &ArtworkV1Support{}},
-			want:   []string{"player@v1", "metadata@v1", "artwork@v1"},
+			want:   []string{"player@v1", "metadata@v1", "controller@v1", "artwork@v1"},
 		},
 		{
 			name:   "visualizer support adds visualizer@v1",
 			config: Config{VisualizerV1Support: &VisualizerV1Support{}},
-			want:   []string{"player@v1", "metadata@v1", "visualizer@v1"},
+			want:   []string{"player@v1", "metadata@v1", "controller@v1", "visualizer@v1"},
 		},
 		{
 			name: "both support structs set",
@@ -177,7 +177,7 @@ func TestBuildSupportedRoles_Default(t *testing.T) {
 				ArtworkV1Support:    &ArtworkV1Support{},
 				VisualizerV1Support: &VisualizerV1Support{},
 			},
-			want: []string{"player@v1", "metadata@v1", "artwork@v1", "visualizer@v1"},
+			want: []string{"player@v1", "metadata@v1", "controller@v1", "artwork@v1", "visualizer@v1"},
 		},
 	}
 

@@ -453,6 +453,21 @@ func (p *Player) Close() error {
 	return nil
 }
 
+// SendCommand sends a controller command to the server (e.g., "play",
+// "pause", "next", "previous"). This is how a player requests playback
+// control — the server decides whether to act on it.
+func (p *Player) SendCommand(command string) error {
+	if p.receiver == nil || p.receiver.client == nil {
+		return fmt.Errorf("not connected")
+	}
+	payload := map[string]interface{}{
+		"controller": map[string]interface{}{
+			"command": command,
+		},
+	}
+	return p.receiver.client.Send("client/command", payload)
+}
+
 func (p *Player) sendState() error {
 	if p.receiver == nil || p.receiver.client == nil {
 		return nil

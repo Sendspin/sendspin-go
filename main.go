@@ -85,11 +85,13 @@ func main() {
 
 	var tuiProg *tea.Program
 	var volumeCtrl *ui.VolumeControl
+	var transportCtrl *ui.TransportControl
 
 	if useTUI {
 		volumeCtrl = ui.NewVolumeControl()
+		transportCtrl = ui.NewTransportControl()
 		var err error
-		tuiProg, err = ui.Run(volumeCtrl)
+		tuiProg, err = ui.Run(volumeCtrl, transportCtrl)
 		if err != nil {
 			log.Fatalf("Failed to start TUI: %v", err)
 		}
@@ -150,10 +152,11 @@ func main() {
 		},
 		OnStateChange: func(state sendspin.PlayerState) {
 			updateTUI(ui.StatusMsg{
-				Codec:      state.Codec,
-				SampleRate: state.SampleRate,
-				Channels:   state.Channels,
-				BitDepth:   state.BitDepth,
+				Codec:         state.Codec,
+				SampleRate:    state.SampleRate,
+				Channels:      state.Channels,
+				BitDepth:      state.BitDepth,
+				PlaybackState: state.State,
 			})
 			connected := state.Connected
 			serverLabel := serverAddress
@@ -211,6 +214,10 @@ func main() {
 		go handleVolumeControl(player, volumeCtrl)
 	}
 
+	if transportCtrl != nil {
+		go handleTransportControl(player, transportCtrl)
+	}
+
 	if tuiProg != nil {
 		go statsUpdateLoop(player, updateTUI)
 	}
@@ -247,6 +254,40 @@ func handleVolumeControl(player *sendspin.Player, volumeCtrl *ui.VolumeControl) 
 	}
 }
 
+func handleTransportControl(player *sendspin.Player, ctrl *ui.TransportControl) {
+	for cmd := range ctrl.Commands {
+		if !player.Status().Connected {
+			log.Printf("Transport command %q ignored: not connected", cmd.Command)
+			continue
+		}
+		var err error
+		switch cmd.Command {
+		case "toggle":
+			// Toggle sends "pause" if server is playing, "play" otherwise.
+			// The server decides the actual state; we just request it.
+			status := player.Status()
+			if status.State == "playing" {
+				err = player.SendCommand("pause")
+			} else {
+				err = player.SendCommand("play")
+			}
+		case "play":
+			err = player.SendCommand("play")
+		case "pause":
+			err = player.SendCommand("pause")
+		case "next":
+			err = player.SendCommand("next")
+		case "previous":
+			err = player.SendCommand("previous")
+		case "reconnect":
+			log.Printf("Manual reconnect requested")
+		}
+		if err != nil {
+			log.Printf("Transport command %q failed: %v", cmd.Command, err)
+		}
+	}
+}
+
 func statsUpdateLoop(player *sendspin.Player, updateTUI func(ui.StatusMsg)) {
 	ticker := time.NewTicker(500 * time.Millisecond)
 	defer ticker.Stop()
@@ -263,8 +304,6 @@ func statsUpdateLoop(player *sendspin.Player, updateTUI func(ui.StatusMsg)) {
 			SyncRTT:     stats.SyncRTT,
 			SyncQuality: stats.SyncQuality,
 			Goroutines:  runtime.NumGoroutine(),
-			MemAlloc:    0,
-			MemSys:      0,
 		})
 	}
 }
