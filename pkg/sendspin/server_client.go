@@ -34,10 +34,11 @@ type ServerClient struct {
 	volume int
 	muted  bool
 
-	codec       string
-	opusEncoder *server.OpusEncoder
-	flacEncoder *server.FLACEncoder
-	resampler   *audio.Resampler // non-nil only when source rate != 48kHz
+	codec         string
+	opusEncoder   *server.OpusEncoder
+	flacEncoder   *server.FLACEncoder
+	resampler     *audio.Resampler // non-nil only when source rate != 48kHz
+	bufferTracker *BufferTracker
 
 	sendChan chan interface{}
 	done     chan struct{}

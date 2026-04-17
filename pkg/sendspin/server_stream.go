@@ -63,6 +63,7 @@ func (s *Server) generateAndSendChunk() {
 		opusEncoder := c.opusEncoder
 		flacEncoder := c.flacEncoder
 		resampler := c.resampler
+		tracker := c.bufferTracker
 		c.mu.RUnlock()
 
 		switch codec {
@@ -105,10 +106,29 @@ func (s *Server) generateAndSendChunk() {
 
 		chunk := CreateAudioChunk(playbackTime, audioData)
 
+		if tracker != nil {
+			chunkDurationUs := int64(ChunkDurationMs) * 1000
+			tracker.PruneConsumed(currentTime)
+			if !tracker.CanSend(len(chunk), chunkDurationUs) {
+				if s.config.Debug {
+					log.Printf("Buffer full for %s, skipping chunk (%d bytes buffered)",
+						c.name, tracker.BufferedBytes())
+				}
+				continue
+			}
+		}
+
 		if err := c.SendBinary(chunk); err != nil {
 			if s.config.Debug {
 				log.Printf("Error sending audio to %s: %v", c.name, err)
 			}
+			continue
+		}
+
+		if tracker != nil {
+			chunkDurationUs := int64(ChunkDurationMs) * 1000
+			chunkEndTimeUs := playbackTime + chunkDurationUs
+			tracker.Register(chunkEndTimeUs, len(chunk), chunkDurationUs)
 		}
 	}
 }
