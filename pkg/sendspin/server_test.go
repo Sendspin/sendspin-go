@@ -871,3 +871,92 @@ func TestServer_FLACStreamNegotiation(t *testing.T) {
 		t.Fatal("never received stream/start with FLAC")
 	}
 }
+
+// TestServer_BufferTrackerLimitsChunks verifies that the server's
+// BufferTracker prevents buffer overflow. A client advertising a tiny
+// buffer_capacity should receive fewer chunks than one with a large
+// capacity, because the server skips sends when the tracker is full.
+func TestServer_BufferTrackerLimitsChunks(t *testing.T) {
+	s, err := NewServer(ServerConfig{
+		Port:   8937,
+		Name:   "Buffer Test",
+		Source: NewTestTone(48000, 2),
+		Debug:  true,
+	})
+	if err != nil {
+		t.Fatalf("NewServer: %v", err)
+	}
+
+	errChan := make(chan error, 1)
+	go func() { errChan <- s.Start() }()
+	defer func() {
+		s.Stop()
+		select {
+		case <-errChan:
+		case <-time.After(5 * time.Second):
+			t.Error("server stop timeout")
+		}
+	}()
+
+	time.Sleep(200 * time.Millisecond)
+
+	// Connect with a small buffer capacity (20000 bytes).
+	// At 48kHz stereo 24-bit PCM, one 20ms chunk is ~5760 bytes of audio
+	// plus the 9-byte chunk header (~5769 total). So 20000 bytes fits ~3
+	// chunks at a time. As playback time advances, PruneConsumed frees
+	// slots, but the tracker still throttles the send rate well below 50
+	// chunks/second.
+	conn, _, err := websocket.DefaultDialer.Dial("ws://localhost:8937/sendspin", nil)
+	if err != nil {
+		t.Fatalf("dial: %v", err)
+	}
+	defer conn.Close()
+
+	hello := protocol.Message{
+		Type: "client/hello",
+		Payload: protocol.ClientHello{
+			ClientID:       "buffer-test-client",
+			Name:           "Buffer Test Client",
+			Version:        1,
+			SupportedRoles: []string{"player@v1", "metadata@v1"},
+			PlayerV1Support: &protocol.PlayerV1Support{
+				SupportedFormats: []protocol.AudioFormat{
+					{Codec: "pcm", SampleRate: 48000, Channels: 2, BitDepth: 24},
+				},
+				BufferCapacity: 20000, // Small — fits ~3 PCM chunks at a time
+			},
+		},
+	}
+	if err := conn.WriteJSON(hello); err != nil {
+		t.Fatalf("write hello: %v", err)
+	}
+
+	// Read messages for 1 second and count binary chunks received.
+	binaryCount := 0
+	deadline := time.Now().Add(1 * time.Second)
+	for time.Now().Before(deadline) {
+		conn.SetReadDeadline(deadline)
+		msgType, _, err := conn.ReadMessage()
+		if err != nil {
+			break
+		}
+		if msgType == websocket.BinaryMessage {
+			binaryCount++
+		}
+	}
+
+	// At 50 chunks/second for 1 second, an unlimited client would get ~50 chunks.
+	// With a 5000-byte capacity, the tracker should limit this significantly.
+	// The exact number depends on timing (PruneConsumed frees slots as
+	// playback time passes), but it should be well under 50.
+	t.Logf("Received %d binary chunks in 1s (unlimited would be ~50)", binaryCount)
+
+	// We just verify the tracker is working — some chunks should arrive
+	// (the first one always fits), but far fewer than 50.
+	if binaryCount >= 50 {
+		t.Errorf("received %d chunks — buffer tracker doesn't seem to be limiting", binaryCount)
+	}
+	if binaryCount == 0 {
+		t.Error("received 0 chunks — at least the first should have been sent")
+	}
+}
