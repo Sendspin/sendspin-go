@@ -28,6 +28,16 @@ func (s *Server) streamAudio() {
 }
 
 func (s *Server) generateAndSendChunk() {
+	// Timestamp invariants — do not weaken without re-analysis:
+	//   1. playbackTime is sampled fresh from the monotonic clock on every
+	//      tick. It is NOT a running counter like `pending += chunkDurationUs`.
+	//   2. ChunkDurationMs × sampleRate must divide evenly by 1000 at every
+	//      supported rate. At 20ms this holds: 44.1k→882, 48k→960, 88.2k→1764,
+	//      96k→1920. At 25ms, 44.1k→1102.5 (fractional) — do NOT change the
+	//      constant without also re-working the chunk-size/sample math.
+	// Weakening either invariant re-introduces the drift class described in
+	// aiosendspin#217 (500ms cliff after ~17 minutes at 44.1k/25ms). See also
+	// issue #91 for converting the linear resampler to integer-rational math.
 	currentTime := s.getClockMicros()
 	playbackTime := currentTime + (BufferAheadMs * 1000)
 
