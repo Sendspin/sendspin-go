@@ -264,6 +264,8 @@ Connect to a specific server manually:
 - `--buffer-ms` - Jitter buffer size in milliseconds (default: 150)
 - `--log-file` - Log file path (default: sendspin-player.log)
 - `--client-id` - Override the persisted `client_id`. When set, the value is written to the config file and reused on subsequent launches.
+- `--audio-device` - Playback device name (see `--list-audio-devices`). Empty = miniaudio default.
+- `--list-audio-devices` - Print every playback device miniaudio can see and exit.
 - `--debug` - Enable debug logging
 
 #### Configuration File (`player.yaml`)
@@ -312,7 +314,36 @@ no_reconnect: false
 daemon:       false
 no_tui:       false
 log_file:     "sendspin-player.log"
+audio_device: ""                    # see --list-audio-devices; empty = miniaudio default
 ```
+
+#### Selecting a playback device
+
+On Linux/macOS miniaudio picks its first-choice backend and that backend's default sink, which is usually fine on desktops but can route to the wrong card on a headless Pi (e.g. HDMI instead of a USB DAC or speaker HAT). To see what miniaudio sees and pick a specific device:
+
+```bash
+$ sendspin-player --list-audio-devices
+Playback devices:
+  [*] HDA Intel PCH: ALC257 Analog (hw:0,0)
+  [ ] HDMI 0 (hw:0,3)
+  [ ] USB Audio Device (hw:1,0)
+
+[*] = current default. Use --audio-device "<name>" or set audio_device: in player.yaml.
+```
+
+Then either:
+
+```bash
+./sendspin-player --audio-device "USB Audio Device"
+```
+
+Or in `player.yaml`:
+
+```yaml
+audio_device: "USB Audio Device"
+```
+
+The name must match exactly (case-sensitive, including any `(hw:X,Y)` suffix ALSA appends). If the name doesn't match, the player fails to start and lists every available device — silent fallback is deliberately not offered, because "it's not playing" is harder to debug than "it refused to start."
 
 #### Player Identity (`client_id`)
 

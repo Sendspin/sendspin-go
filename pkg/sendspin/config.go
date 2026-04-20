@@ -38,6 +38,7 @@ type PlayerConfigFile struct {
 	PreferredCodec string `yaml:"preferred_codec,omitempty"`
 	BufferCapacity *int   `yaml:"buffer_capacity,omitempty"`
 	ClientID       string `yaml:"client_id,omitempty"`
+	AudioDevice    string `yaml:"audio_device,omitempty"`
 }
 
 // LoadPlayerConfig searches for a player.yaml and returns its parsed contents
@@ -177,6 +178,9 @@ func (c *PlayerConfigFile) asStringMap() map[string]string {
 	}
 	if c.ClientID != "" {
 		m["client_id"] = c.ClientID
+	}
+	if c.AudioDevice != "" {
+		m["audio_device"] = c.AudioDevice
 	}
 	return m
 }

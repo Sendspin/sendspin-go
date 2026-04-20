@@ -6,18 +6,31 @@ import (
 	"context"
 	"fmt"
 	"log"
+	"sort"
+	"strings"
 	"sync"
 	"time"
+	"unsafe"
 
 	"github.com/Sendspin/sendspin-go/pkg/audio"
 	"github.com/gen2brain/malgo"
 )
+
+// PlaybackDevice describes a playback endpoint discoverable via miniaudio.
+// Returned by ListPlaybackDevices and used to select a specific device when
+// constructing a Malgo output.
+type PlaybackDevice struct {
+	Name      string
+	IsDefault bool
+	ID        malgo.DeviceID
+}
 
 type Malgo struct {
 	ctx        context.Context
 	cancel     context.CancelFunc
 	malgoCtx   *malgo.AllocatedContext
 	device     *malgo.Device
+	deviceName string // empty = use default
 	sampleRate int
 	channels   int
 	bitDepth   int
@@ -98,15 +111,86 @@ func (rb *RingBuffer) Free() int {
 	return rb.size - rb.count
 }
 
-func NewMalgo() Output {
+// NewMalgo constructs a new malgo-backed audio output. deviceName selects a
+// specific playback device by name (as reported by ListPlaybackDevices). An
+// empty deviceName lets miniaudio pick the platform default.
+func NewMalgo(deviceName string) Output {
 	ctx, cancel := context.WithCancel(context.Background())
 
 	return &Malgo{
-		ctx:    ctx,
-		cancel: cancel,
-		volume: 100,
-		muted:  false,
+		ctx:        ctx,
+		cancel:     cancel,
+		deviceName: deviceName,
+		volume:     100,
+		muted:      false,
 	}
+}
+
+// ListPlaybackDevices enumerates every playback device miniaudio can see.
+// It creates a fresh context and tears it down before returning, so it is
+// safe to call before any player/device has been initialized.
+func ListPlaybackDevices() ([]PlaybackDevice, error) {
+	ctx, err := malgo.InitContext(nil, malgo.ContextConfig{}, nil)
+	if err != nil {
+		return nil, fmt.Errorf("init malgo context: %w", err)
+	}
+	defer func() {
+		_ = ctx.Uninit()
+		ctx.Free()
+	}()
+
+	infos, err := ctx.Devices(malgo.Playback)
+	if err != nil {
+		return nil, fmt.Errorf("enumerate playback devices: %w", err)
+	}
+
+	out := make([]PlaybackDevice, 0, len(infos))
+	for _, info := range infos {
+		out = append(out, PlaybackDevice{
+			Name:      info.Name(),
+			IsDefault: info.IsDefault != 0,
+			ID:        info.ID,
+		})
+	}
+	return out, nil
+}
+
+// matchDevice picks a PlaybackDevice from a list based on a requested name.
+//
+// Empty requested name -> the device with IsDefault set, else the first in
+// the list, else nil if the list is empty (caller falls back to whatever
+// miniaudio's default-config path does).
+//
+// Non-empty requested name -> exact match on Name. If no match: returns an
+// error whose message lists every available device name so the user can fix
+// the config. Fail-loud is intentional: silent fallback to default is the
+// behavior this feature exists to correct.
+func matchDevice(devices []PlaybackDevice, requested string) (*PlaybackDevice, error) {
+	if requested == "" {
+		if len(devices) == 0 {
+			return nil, nil
+		}
+		for i := range devices {
+			if devices[i].IsDefault {
+				return &devices[i], nil
+			}
+		}
+		return &devices[0], nil
+	}
+	for i := range devices {
+		if devices[i].Name == requested {
+			return &devices[i], nil
+		}
+	}
+	if len(devices) == 0 {
+		return nil, fmt.Errorf("audio device %q not found (no playback devices available)", requested)
+	}
+	names := make([]string, 0, len(devices))
+	for _, d := range devices {
+		names = append(names, d.Name)
+	}
+	sort.Strings(names)
+	return nil, fmt.Errorf("audio device %q not found; available: %s", requested, strings.Join(names, ", "))
 }
 
 func (m *Malgo) Open(sampleRate, channels, bitDepth int) error {
@@ -158,6 +242,36 @@ func (m *Malgo) Open(sampleRate, channels, bitDepth int) error {
 	deviceConfig.SampleRate = uint32(sampleRate)
 	deviceConfig.Alsa.NoMMap = 1
 
+	// Resolve the playback device. When m.deviceName is empty, miniaudio's
+	// enumerated default is picked (and logged so the operator knows what
+	// they're getting). When non-empty, the device must exist or Open fails
+	// loudly — silent fallback defeats the point of the knob.
+	infos, err := m.malgoCtx.Devices(malgo.Playback)
+	if err != nil {
+		return fmt.Errorf("enumerate playback devices: %w", err)
+	}
+	catalog := make([]PlaybackDevice, 0, len(infos))
+	for _, info := range infos {
+		catalog = append(catalog, PlaybackDevice{
+			Name:      info.Name(),
+			IsDefault: info.IsDefault != 0,
+			ID:        info.ID,
+		})
+	}
+	chosen, err := matchDevice(catalog, m.deviceName)
+	if err != nil {
+		return err
+	}
+	chosenLabel := "(miniaudio default)"
+	if chosen != nil {
+		deviceConfig.Playback.DeviceID = unsafe.Pointer(&chosen.ID[0])
+		if chosen.IsDefault {
+			chosenLabel = fmt.Sprintf("%q (default)", chosen.Name)
+		} else {
+			chosenLabel = fmt.Sprintf("%q", chosen.Name)
+		}
+	}
+
 	onSamples := func(pOutputSample, pInputSamples []byte, frameCount uint32) {
 		m.dataCallback(pOutputSample, frameCount)
 	}
@@ -182,8 +296,8 @@ func (m *Malgo) Open(sampleRate, channels, bitDepth int) error {
 	m.bitDepth = bitDepth
 	m.ready = true
 
-	log.Printf("Audio output initialized: %dHz, %d channels, %d-bit (malgo/%s)",
-		sampleRate, channels, bitDepth, formatName(format))
+	log.Printf("Audio output initialized: device=%s %dHz/%dch/%d-bit (malgo/%s)",
+		chosenLabel, sampleRate, channels, bitDepth, formatName(format))
 
 	return nil
 }
