@@ -52,12 +52,12 @@ func hotkey(trigger rune, label string) string {
 // outside the printable range works; using specific private-use-area code
 // points keeps them self-documenting in stack traces.
 const (
-	KeySpace rune = '\uE000' // "Space"
-	KeyUp    rune = '\uE001' // "↑"
-	KeyDown  rune = '\uE002' // "↓"
+	KeySpace  rune = '\uE000' // "Space"
+	KeyUp     rune = '\uE001' // "↑"
+	KeyDown   rune = '\uE002' // "↓"
 	KeyUpDown rune = '\uE003' // "↑↓"
-	KeyEnter rune = '\uE004' // "Enter"
-	KeyEsc   rune = '\uE005' // "Esc"
+	KeyEnter  rune = '\uE004' // "Enter"
+	KeyEsc    rune = '\uE005' // "Esc"
 )
 
 func specialKeyName(r rune) (string, bool) {
