@@ -92,12 +92,19 @@ install-daemon: player
 	else \
 		echo "/etc/default/sendspin-player already exists, not overwriting."; \
 	fi
+	@if [ ! -f /etc/sendspin/player.yaml ]; then \
+		install -d -m 755 /etc/sendspin; \
+		install -m 644 dist/config/player.example.yaml /etc/sendspin/player.yaml; \
+		echo "Created /etc/sendspin/player.yaml — edit this file to configure."; \
+	else \
+		echo "/etc/sendspin/player.yaml already exists, not overwriting."; \
+	fi
 	systemctl daemon-reload
 	@echo ""
 	@echo "Installed. To start:"
 	@echo "  sudo systemctl enable --now sendspin-player"
 	@echo ""
-	@echo "Configure via /etc/default/sendspin-player"
+	@echo "Configure via /etc/sendspin/player.yaml (preferred) or /etc/default/sendspin-player"
 
 # Uninstall the systemd daemon
 uninstall-daemon:
@@ -107,7 +114,7 @@ uninstall-daemon:
 	rm -f /etc/systemd/system/sendspin-player.service
 	rm -f /usr/local/bin/sendspin-player
 	systemctl daemon-reload
-	@echo "Removed. /etc/default/sendspin-player left in place (manual cleanup if desired)."
+	@echo "Removed. /etc/default/sendspin-player and /etc/sendspin/player.yaml left in place (manual cleanup if desired)."
 
 # Conformance test suite — runs the Sendspin protocol conformance harness
 # against the local sendspin-go checkout. Mirrors what CI does so contributors

@@ -1,0 +1,85 @@
+# sendspin-player configuration
+#
+# Search order (first existing file wins; missing is not an error):
+#   1. --config <path>
+#   2. $SENDSPIN_PLAYER_CONFIG
+#   3. ~/.config/sendspin/player.yaml           (user install)
+#   4. /etc/sendspin/player.yaml                (daemon / system-wide)
+#
+# Per-value precedence for every key below:
+#   CLI flag > SENDSPIN_PLAYER_<UPPER_SNAKE> env > this file > built-in default
+#
+# Every key is optional. Uncomment and adjust as needed. The player will
+# write its auto-derived client_id back into this file on first launch so
+# Music Assistant keeps recognizing the same player across restarts.
+
+# ---------------------------------------------------------------------------
+# Identity
+# ---------------------------------------------------------------------------
+
+# Friendly name shown in Music Assistant and on the server.
+# Default: <hostname>-sendspin-player
+# name: "Living Room"
+
+# Stable identifier the server uses as the player_id. Leave unset and the
+# player derives it from the primary network interface MAC on first launch
+# and writes the result here. Set explicitly to seed a specific id, or to
+# run multiple players on one host (use a distinct --config file per
+# instance so each gets its own client_id).
+# client_id: "aa:bb:cc:dd:ee:ff"
+
+# ---------------------------------------------------------------------------
+# Network
+# ---------------------------------------------------------------------------
+
+# Manual server address (host:port). Leave empty to use mDNS discovery.
+# server: "192.168.1.100:8927"
+
+# UDP port advertised via mDNS.
+# port: 8927
+
+# ---------------------------------------------------------------------------
+# Audio
+# ---------------------------------------------------------------------------
+
+# Jitter buffer size in milliseconds. Higher tolerates more network jitter
+# at the cost of added latency.
+# buffer_ms: 150
+
+# Static playback delay in milliseconds applied to every scheduled play
+# time. Compensates for hardware that introduces a fixed downstream delay
+# (Bluetooth sinks, AVRs with DSP, some USB DACs).
+# static_delay_ms: 0
+
+# Preferred codec. The server picks this first if both sides support it.
+# One of: pcm, opus, flac. Empty = server default (pcm).
+# preferred_codec: "flac"
+
+# Receive buffer capacity in bytes advertised to the server. Controls how
+# far ahead the server may send audio.
+# buffer_capacity: 1048576
+
+# ---------------------------------------------------------------------------
+# Device identity (shown in Music Assistant's device registry)
+# ---------------------------------------------------------------------------
+
+# product_name: "Living Room Speaker"
+# manufacturer: "Acme"
+
+# ---------------------------------------------------------------------------
+# Behavior
+# ---------------------------------------------------------------------------
+
+# Disable automatic reconnect on connection loss. Default false (the player
+# reconnects with exponential backoff).
+# no_reconnect: false
+
+# Daemon mode: log to stdout only (journalctl-friendly), no TUI, no log file.
+# Recommended when running under systemd.
+# daemon: false
+
+# Disable the interactive terminal UI, stream logs to stdout instead.
+# no_tui: false
+
+# Log file path. Ignored when daemon mode is on.
+# log_file: "sendspin-player.log"
