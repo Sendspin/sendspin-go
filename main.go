@@ -36,6 +36,8 @@ var (
 	daemon         = flag.Bool("daemon", false, "Daemon mode: log to stdout only (journalctl-friendly), no TUI, no log file")
 	preferredCodec = flag.String("preferred-codec", "", "Preferred codec: pcm (default), opus, or flac")
 	bufferCapacity = flag.Int("buffer-capacity", 1048576, "Buffer capacity in bytes advertised to server (default: 1MB)")
+	clientID       = flag.String("client-id", "", "Override the persisted client_id. When set, the value is written to the client-id file and reused on subsequent launches.")
+	clientIDFile   = flag.String("client-id-file", "", "Override the path to the client_id config file (default: OS user config dir). Use a distinct path per instance to run multiple players on one host.")
 )
 
 func main() {
@@ -145,6 +147,8 @@ func main() {
 		StaticDelayMs:  *staticDelayMs,
 		PreferredCodec: *preferredCodec,
 		BufferCapacity: *bufferCapacity,
+		ClientID:       *clientID,
+		ConfigPath:     *clientIDFile,
 		DeviceInfo: sendspin.DeviceInfo{
 			ProductName:     deviceProduct,
 			Manufacturer:    deviceManufacturer,
