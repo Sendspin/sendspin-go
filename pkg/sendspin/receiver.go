@@ -22,15 +22,10 @@ type ReceiverConfig struct {
 	StaticDelayMs  int    // optional static latency compensation (ms) applied to every scheduled play time
 	PreferredCodec string // "pcm", "opus", or "flac" — reorders the advertised format list so the server picks this codec first
 	BufferCapacity int    // buffer_capacity in bytes advertised to the server (default: 1048576 = 1MB)
-	// ClientID optionally overrides the resolved client_id. When empty, the
-	// receiver calls ResolveClientID() to fall through persisted -> MAC -> UUID.
-	// When non-empty, the value is persisted by ResolveClientID so later
-	// launches pick it up without the override flag.
-	ClientID string
-	// ConfigPath optionally overrides the path to the client_id config file.
-	// When empty, the default OS-specific user config path is used. Set this
-	// to run multiple player instances on the same host with distinct ids.
-	ConfigPath     string
+	// ClientID is the already-resolved client_id to advertise in client/hello.
+	// Required — callers should compute this once at startup (typically via
+	// ResolveClientID) and thread the same value through reconnects.
+	ClientID       string
 	DeviceInfo     DeviceInfo
 	DecoderFactory func(audio.Format) (decode.Decoder, error)
 	OnMetadata     func(Metadata)
@@ -146,14 +141,13 @@ func (r *Receiver) Stats() ReceiverStats {
 // Connect establishes a connection to the server, performs initial clock sync,
 // and starts background goroutines for connection watching and clock sync.
 func (r *Receiver) Connect() error {
-	clientID, err := ResolveClientID(r.config.ClientID, r.config.ConfigPath)
-	if err != nil {
-		return fmt.Errorf("resolve client_id: %w", err)
+	if r.config.ClientID == "" {
+		return fmt.Errorf("ReceiverConfig.ClientID is required (resolve via sendspin.ResolveClientID)")
 	}
 
 	clientConfig := protocol.Config{
 		ServerAddr: r.serverAddr,
-		ClientID:   clientID,
+		ClientID:   r.config.ClientID,
 		Name:       r.config.PlayerName,
 		Version:    1,
 		DeviceInfo: protocol.DeviceInfo{

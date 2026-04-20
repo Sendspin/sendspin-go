@@ -62,16 +62,10 @@ type PlayerConfig struct {
 	// it sends audio. Default: 1048576 (1MB).
 	BufferCapacity int
 
-	// ClientID optionally overrides the resolved client_id. Empty means
-	// resolve from the persisted config file, then the primary MAC, then
-	// a generated UUID. When set, the value is persisted so subsequent
-	// launches pick it up without the override flag.
+	// ClientID is the already-resolved client_id to advertise in client/hello.
+	// Required — callers should compute this once at startup (typically via
+	// ResolveClientID) and reuse the same value across reconnects.
 	ClientID string
-
-	// ConfigPath optionally overrides the path to the client_id config file.
-	// When empty, the default OS-specific user config path is used. Set this
-	// to run multiple player instances on the same host with distinct ids.
-	ConfigPath string
 
 	DeviceInfo DeviceInfo
 
@@ -212,7 +206,6 @@ func (p *Player) buildReceiver(addr string) (*Receiver, error) {
 		PreferredCodec: p.config.PreferredCodec,
 		BufferCapacity: p.config.BufferCapacity,
 		ClientID:       p.config.ClientID,
-		ConfigPath:     p.config.ConfigPath,
 		DeviceInfo:     p.config.DeviceInfo,
 		DecoderFactory: p.config.DecoderFactory,
 		OnMetadata:     p.config.OnMetadata,
