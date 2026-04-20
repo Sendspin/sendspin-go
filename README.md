@@ -270,6 +270,8 @@ Connect to a specific server manually:
 
 Every CLI flag has a matching key in `player.yaml`. Keys use `snake_case` (`--buffer-ms` ↔ `buffer_ms`).
 
+A fully-commented starter file lives at [`dist/config/player.example.yaml`](dist/config/player.example.yaml) — copy it to `~/.config/sendspin/player.yaml` (user install) or `/etc/sendspin/player.yaml` (daemon) and uncomment the keys you want to set.
+
 **Search order** (first existing file wins; missing is not an error):
 
 1. `--config <path>` flag
