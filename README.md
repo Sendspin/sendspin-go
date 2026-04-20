@@ -262,7 +262,35 @@ Connect to a specific server manually:
 - `--name` - Player friendly name (default: hostname-sendspin-player)
 - `--buffer-ms` - Jitter buffer size in milliseconds (default: 150)
 - `--log-file` - Log file path (default: sendspin-player.log)
+- `--client-id` - Override the persisted `client_id`. The value is written to the client-id file and reused on subsequent launches.
+- `--client-id-file` - Override the path to the client-id file (default: OS user config dir). Use a distinct path per instance to run multiple players on one host.
 - `--debug` - Enable debug logging
+
+#### Player Identity (`client_id`)
+
+The player sends a stable `client_id` to the server so controllers like Music Assistant treat it as the same player across restarts. Resolution order:
+
+1. `--client-id` flag (when set, also persisted to the client-id file)
+2. Persisted value from the client-id file
+3. MAC address of the primary network interface (`xx:xx:xx:xx:xx:xx`)
+4. Freshly generated UUID (written to the client-id file and reused next launch)
+
+Default client-id file location:
+
+- Linux / Raspberry Pi: `~/.config/sendspin-player/client-id`
+- macOS: `~/Library/Application Support/sendspin-player/client-id`
+- Windows: `%AppData%\sendspin-player\client-id`
+
+Deleting this file causes the next launch to re-derive a `client_id`, which the server will see as a new player.
+
+Running two players on the same host:
+
+```bash
+./sendspin-player --name "Kitchen"  --client-id-file ~/.config/sendspin-player/kitchen.id &
+./sendspin-player --name "Bedroom"  --client-id-file ~/.config/sendspin-player/bedroom.id &
+```
+
+Each instance resolves and persists its identity independently.
 
 #### Player TUI
 
