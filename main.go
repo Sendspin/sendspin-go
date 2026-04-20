@@ -119,7 +119,21 @@ func main() {
 		volumeCtrl = ui.NewVolumeControl()
 		transportCtrl = ui.NewTransportControl()
 		var err error
-		tuiProg, err = ui.Run(volumeCtrl, transportCtrl)
+		// Hand the picker a writable config path — fall back to the OS
+		// default location if nothing was loaded, so selections still persist
+		// on first-ever launch.
+		uiConfigPath := loadedConfigPath
+		if uiConfigPath == "" {
+			if p, perr := sendspin.DefaultPlayerConfigPath(); perr == nil {
+				uiConfigPath = p
+			}
+		}
+		tuiProg, err = ui.Run(ui.Config{
+			VolumeCtrl:    volumeCtrl,
+			TransportCtrl: transportCtrl,
+			ConfigPath:    uiConfigPath,
+			AudioDevice:   *audioDevice,
+		})
 		if err != nil {
 			log.Fatalf("Failed to start TUI: %v", err)
 		}

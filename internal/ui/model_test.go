@@ -10,7 +10,7 @@ import (
 )
 
 func TestNewModel(t *testing.T) {
-	model := NewModel(nil, nil) // VolumeControl and TransportControl are optional for testing
+	model := NewModel(Config{}) // VolumeControl and TransportControl are optional for testing
 
 	// Check initial state
 	if model.connected {
@@ -35,7 +35,7 @@ func TestNewModel(t *testing.T) {
 }
 
 func TestStatusMsgConnected(t *testing.T) {
-	model := NewModel(nil, nil)
+	model := NewModel(Config{})
 
 	connected := true
 	msg := StatusMsg{
@@ -55,7 +55,7 @@ func TestStatusMsgConnected(t *testing.T) {
 }
 
 func TestStatusMsgDisconnected(t *testing.T) {
-	model := NewModel(nil, nil)
+	model := NewModel(Config{})
 
 	// First connect
 	connected := true
@@ -71,7 +71,7 @@ func TestStatusMsgDisconnected(t *testing.T) {
 }
 
 func TestStatusMsgSyncStats(t *testing.T) {
-	model := NewModel(nil, nil)
+	model := NewModel(Config{})
 
 	msg := StatusMsg{
 		SyncRTT:     5000,
@@ -90,7 +90,7 @@ func TestStatusMsgSyncStats(t *testing.T) {
 }
 
 func TestStatusMsgStreamInfo(t *testing.T) {
-	model := NewModel(nil, nil)
+	model := NewModel(Config{})
 
 	msg := StatusMsg{
 		Codec:      "opus",
@@ -119,7 +119,7 @@ func TestStatusMsgStreamInfo(t *testing.T) {
 }
 
 func TestStatusMsgMetadata(t *testing.T) {
-	model := NewModel(nil, nil)
+	model := NewModel(Config{})
 
 	msg := StatusMsg{
 		Title:  "Test Song",
@@ -143,7 +143,7 @@ func TestStatusMsgMetadata(t *testing.T) {
 }
 
 func TestStatusMsgArtworkPath(t *testing.T) {
-	model := NewModel(nil, nil)
+	model := NewModel(Config{})
 
 	msg := StatusMsg{
 		ArtworkPath: "/tmp/artwork.jpg",
@@ -157,7 +157,7 @@ func TestStatusMsgArtworkPath(t *testing.T) {
 }
 
 func TestStatusMsgVolume(t *testing.T) {
-	model := NewModel(nil, nil)
+	model := NewModel(Config{})
 
 	msg := StatusMsg{
 		Volume: 75,
@@ -171,7 +171,7 @@ func TestStatusMsgVolume(t *testing.T) {
 }
 
 func TestStatusMsgStats(t *testing.T) {
-	model := NewModel(nil, nil)
+	model := NewModel(Config{})
 
 	msg := StatusMsg{
 		Received:    1000,
@@ -200,7 +200,7 @@ func TestStatusMsgStats(t *testing.T) {
 }
 
 func TestStatusMsgRuntimeStats(t *testing.T) {
-	model := NewModel(nil, nil)
+	model := NewModel(Config{})
 
 	msg := StatusMsg{
 		Goroutines: 42,
@@ -214,7 +214,7 @@ func TestStatusMsgRuntimeStats(t *testing.T) {
 }
 
 func TestMultipleStatusUpdates(t *testing.T) {
-	model := NewModel(nil, nil)
+	model := NewModel(Config{})
 
 	// First update
 	connected := true
@@ -244,7 +244,7 @@ func TestMultipleStatusUpdates(t *testing.T) {
 }
 
 func TestStatusMsgZeroValues(t *testing.T) {
-	model := NewModel(nil, nil)
+	model := NewModel(Config{})
 
 	// Set some non-zero values first
 	model.applyStatus(StatusMsg{
@@ -317,7 +317,7 @@ func TestChannelNameFunction(t *testing.T) {
 }
 
 func TestSyncQualityDisplay(t *testing.T) {
-	model := NewModel(nil, nil)
+	model := NewModel(Config{})
 
 	// Test different quality levels
 	// Note: quality is only applied when SyncRTT is non-zero
@@ -340,7 +340,7 @@ func TestSyncQualityDisplay(t *testing.T) {
 }
 
 func TestMetadataClearing(t *testing.T) {
-	model := NewModel(nil, nil)
+	model := NewModel(Config{})
 
 	// Set metadata
 	model.applyStatus(StatusMsg{
@@ -363,7 +363,7 @@ func TestMetadataClearing(t *testing.T) {
 }
 
 func TestPlaybackStateApplication(t *testing.T) {
-	model := NewModel(nil, nil)
+	model := NewModel(Config{})
 
 	// Initial state should be idle
 	if model.playbackState != "idle" {
@@ -391,7 +391,7 @@ func TestPlaybackStateApplication(t *testing.T) {
 
 func TestTransportKeyToggle(t *testing.T) {
 	tc := NewTransportControl()
-	model := NewModel(nil, tc)
+	model := NewModel(Config{TransportCtrl: tc})
 	model.width = 80
 	model.height = 24
 
@@ -411,7 +411,7 @@ func TestTransportKeyToggle(t *testing.T) {
 
 func TestTransportKeyNext(t *testing.T) {
 	tc := NewTransportControl()
-	model := NewModel(nil, tc)
+	model := NewModel(Config{TransportCtrl: tc})
 	model.width = 80
 	model.height = 24
 
@@ -430,7 +430,7 @@ func TestTransportKeyNext(t *testing.T) {
 
 func TestTransportKeyPrevious(t *testing.T) {
 	tc := NewTransportControl()
-	model := NewModel(nil, tc)
+	model := NewModel(Config{TransportCtrl: tc})
 	model.width = 80
 	model.height = 24
 
@@ -449,7 +449,7 @@ func TestTransportKeyPrevious(t *testing.T) {
 
 func TestTransportKeyReconnect(t *testing.T) {
 	tc := NewTransportControl()
-	model := NewModel(nil, tc)
+	model := NewModel(Config{TransportCtrl: tc})
 	model.width = 80
 	model.height = 24
 
@@ -468,7 +468,7 @@ func TestTransportKeyReconnect(t *testing.T) {
 
 func TestTransportNilSafe(t *testing.T) {
 	// Transport keys should not panic when transportCtrl is nil
-	model := NewModel(nil, nil)
+	model := NewModel(Config{})
 	model.width = 80
 	model.height = 24
 

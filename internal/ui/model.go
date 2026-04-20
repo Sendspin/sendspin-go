@@ -5,10 +5,24 @@ package ui
 import (
 	"fmt"
 	"strings"
+	"time"
 
+	"github.com/Sendspin/sendspin-go/pkg/audio/output"
+	"github.com/Sendspin/sendspin-go/pkg/sendspin"
 	"github.com/Sendspin/sendspin-go/pkg/sync"
 	tea "github.com/charmbracelet/bubbletea"
 )
+
+type uiMode int
+
+const (
+	modeNormal uiMode = iota
+	modeDevicePicker
+)
+
+// transientExpireMsg is fired after a transient banner's lifetime to clear
+// it. Bubbletea's scheduler guarantees at-most-once delivery.
+type transientExpireMsg struct{ nonce uint64 }
 
 // Model represents the TUI state
 type Model struct {
@@ -55,6 +69,23 @@ type Model struct {
 	// Controls
 	volumeCtrl    *VolumeControl
 	transportCtrl *TransportControl
+
+	// Audio device selection
+	audioDevice string // current device driving playback; shown in status row
+	configPath  string // where picker saves audio_device; empty disables save
+
+	// Modal state
+	mode   uiMode
+	picker devicePickerState
+
+	// Transient banner shown in the controls area (e.g. "Saved. Restart to apply.")
+	transientMsg   string
+	transientNonce uint64 // incremented per banner so stale expire ticks are ignored
+
+	// listPlaybackDevices is indirected so tests can stub it.
+	listPlaybackDevices func() ([]output.PlaybackDevice, error)
+	// writeConfigKey persists a key to the config file. Indirected for tests.
+	writeConfigKey func(path, key, value string) error
 }
 
 func (m Model) Init() tea.Cmd {
@@ -70,6 +101,10 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.height = msg.Height
 	case StatusMsg:
 		m.applyStatus(msg)
+	case transientExpireMsg:
+		if msg.nonce == m.transientNonce {
+			m.transientMsg = ""
+		}
 	}
 
 	return m, nil
@@ -78,6 +113,12 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 func (m Model) View() string {
 	if m.width == 0 {
 		return "Loading..."
+	}
+
+	if m.mode == modeDevicePicker {
+		// Modal takes over the viewport; the normal view is suspended. A
+		// minimal header keeps context ("which player am I configuring?").
+		return m.renderHeader() + renderPicker(m.picker, m.width)
 	}
 
 	s := ""
@@ -186,7 +227,32 @@ func (m Model) renderControls() string {
 	bufferStr := fmt.Sprintf("Buffer: %dms", m.bufferDepth)
 	s += fmt.Sprintf("\u2502 %-*s \u2502\n", innerWidth, bufferStr)
 
+	// Output device status row. Uses the hotkey helper so the 'O' rendering
+	// stays in sync with the help line that advertises the trigger.
+	outputName := m.audioDevice
+	if outputName == "" {
+		outputName = "(miniaudio default)"
+	}
+	outputLine := hotkey('o', "Output: "+truncate(outputName, innerWidth-10))
+	s += renderLineWithANSI(innerWidth, outputLine)
+
+	if m.transientMsg != "" {
+		s += renderLineWithANSI(innerWidth, "  "+m.transientMsg)
+	}
+
 	return s
+}
+
+// renderLineWithANSI emits a bordered row whose contents contain ANSI
+// escape sequences. fmt's padding verbs count those escape bytes toward
+// width, leading to short rows; this helper pads using visible-column
+// count instead so every border stays aligned.
+func renderLineWithANSI(innerWidth int, content string) string {
+	pad := innerWidth - displayLen(content)
+	if pad < 0 {
+		pad = 0
+	}
+	return fmt.Sprintf("\u2502 %s%s \u2502\n", content, strings.Repeat(" ", pad))
 }
 
 func (m Model) renderStats() string {
@@ -211,8 +277,21 @@ func (m Model) renderHelp() string {
 	}
 	innerWidth := width - 4
 
-	helpStr := "Space:Play/Pause  n:Next  p:Prev  \u2191/\u2193:Vol  m:Mute  q:Quit"
-	helpLine := fmt.Sprintf("\u2502 %-*s \u2502\n", innerWidth, helpStr)
+	// Uniform hotkey rendering — every trigger character is reverse-
+	// highlighted inline via hotkey(). Separators are two spaces; we rely
+	// on renderLineWithANSI for correct padding because hotkey() emits
+	// escape codes that fmt would miscount.
+	parts := []string{
+		hotkey(KeySpace, "Play/Pause"),
+		hotkey('n', "Next"),
+		hotkey('p', "Prev"),
+		hotkey(KeyUpDown, "Volume"),
+		hotkey('m', "Mute"),
+		hotkey('o', "Output"),
+		hotkey('q', "Quit"),
+	}
+	helpStr := strings.Join(parts, "  ")
+	helpLine := renderLineWithANSI(innerWidth, helpStr)
 	bottom := "\u2514" + repeatString("\u2500", width-2) + "\u2518\n"
 
 	return helpLine + bottom
@@ -237,7 +316,12 @@ func (m Model) renderDebug() string {
 }
 
 func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	if m.mode == modeDevicePicker {
+		return m.handlePickerMode(msg)
+	}
 	switch msg.String() {
+	case "o":
+		return m.openDevicePicker()
 	case "q", "ctrl+c":
 		if m.volumeCtrl != nil {
 			select {
@@ -473,4 +557,69 @@ func formatCodecDisplay(codec string, sampleRate, bitDepth int) string {
 	default:
 		return fmt.Sprintf("%s %s/%dbit", upper, rate, bitDepth)
 	}
+}
+
+// openDevicePicker transitions the Model into modeDevicePicker, enumerating
+// available devices via the injected lister (defaulting to the real
+// output.ListPlaybackDevices). The picker's own state tracks enumeration
+// errors, so we never fail to enter the modal — the user always gets to
+// see *something*, even if it's "couldn't enumerate devices".
+func (m Model) openDevicePicker() (tea.Model, tea.Cmd) {
+	lister := m.listPlaybackDevices
+	if lister == nil {
+		lister = output.ListPlaybackDevices
+	}
+	saveEnabled := m.configPath != ""
+	m.picker = newDevicePicker(lister, m.audioDevice, saveEnabled)
+	m.mode = modeDevicePicker
+	return m, nil
+}
+
+// handlePickerMode dispatches a key to the picker's pure state machine and
+// executes the requested action. Save writes audio_device to the config
+// file and shows a transient "Saved. Restart to apply." banner for 3s.
+func (m Model) handlePickerMode(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	next, action := m.picker.handlePickerKey(msg.String())
+	m.picker = next
+	switch action {
+	case pickerNoop:
+		return m, nil
+	case pickerClose, pickerPropagate:
+		m.mode = modeNormal
+		return m, nil
+	case pickerSave:
+		chosen := m.picker.selected()
+		if chosen == nil {
+			m.mode = modeNormal
+			return m, nil
+		}
+		writer := m.writeConfigKey
+		if writer == nil {
+			writer = sendspin.WriteStringKey
+		}
+		if chosen.Name != m.audioDevice {
+			// No-op when the chosen value already matches what's saved —
+			// matches the client_id write-back behavior and avoids
+			// churning user-edited config files for no reason.
+			if err := writer(m.configPath, "audio_device", chosen.Name); err != nil {
+				m.mode = modeNormal
+				return m.withTransient(fmt.Sprintf("Save failed: %v", err))
+			}
+		}
+		m.mode = modeNormal
+		return m.withTransient(fmt.Sprintf("Saved audio_device=%q. Restart to apply.", chosen.Name))
+	}
+	return m, nil
+}
+
+// withTransient schedules msg to be shown in the status row for ~3 seconds.
+// The nonce guards against a later expire firing for a previously-shown
+// banner that was already overwritten by a newer one.
+func (m Model) withTransient(msg string) (tea.Model, tea.Cmd) {
+	m.transientNonce++
+	m.transientMsg = msg
+	nonce := m.transientNonce
+	return m, tea.Tick(3*time.Second, func(time.Time) tea.Msg {
+		return transientExpireMsg{nonce: nonce}
+	})
 }
