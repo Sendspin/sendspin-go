@@ -67,6 +67,11 @@ type PlayerConfig struct {
 	// ResolveClientID) and reuse the same value across reconnects.
 	ClientID string
 
+	// AudioDevice selects a specific playback device by name (as reported by
+	// output.ListPlaybackDevices). Empty = let miniaudio pick the default.
+	// Open fails loudly if a non-empty name doesn't match an available device.
+	AudioDevice string
+
 	DeviceInfo DeviceInfo
 
 	OnMetadata func(Metadata)
@@ -309,7 +314,7 @@ func jitter(d time.Duration, frac float64) time.Duration {
 
 func (p *Player) onStreamStart(format audio.Format) {
 	if p.output == nil {
-		p.output = output.NewMalgo()
+		p.output = output.NewMalgo(p.config.AudioDevice)
 	}
 
 	if err := p.output.Open(format.SampleRate, format.Channels, format.BitDepth); err != nil {

@@ -27,6 +27,7 @@ daemon: false
 preferred_codec: "flac"
 buffer_capacity: 2097152
 client_id: "aa:bb:cc:dd:ee:ff"
+audio_device: "USB Audio Device"
 `
 	if err := os.WriteFile(path, []byte(body), 0o600); err != nil {
 		t.Fatalf("seed: %v", err)
@@ -56,6 +57,9 @@ client_id: "aa:bb:cc:dd:ee:ff"
 	}
 	if cfg.ClientID != "aa:bb:cc:dd:ee:ff" {
 		t.Errorf("client_id = %q", cfg.ClientID)
+	}
+	if cfg.AudioDevice != "USB Audio Device" {
+		t.Errorf("audio_device = %q", cfg.AudioDevice)
 	}
 }
 

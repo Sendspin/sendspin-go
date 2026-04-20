@@ -17,6 +17,7 @@ import (
 	"github.com/Sendspin/sendspin-go/internal/discovery"
 	"github.com/Sendspin/sendspin-go/internal/ui"
 	"github.com/Sendspin/sendspin-go/internal/version"
+	"github.com/Sendspin/sendspin-go/pkg/audio/output"
 	"github.com/Sendspin/sendspin-go/pkg/sendspin"
 	tea "github.com/charmbracelet/bubbletea"
 )
@@ -38,15 +39,26 @@ var (
 	bufferCapacity = flag.Int("buffer-capacity", 1048576, "Buffer capacity in bytes advertised to server (default: 1MB)")
 	clientID       = flag.String("client-id", "", "Override the persisted client_id. When set, the value is written to the config file and reused on subsequent launches.")
 	configPath     = flag.String("config", "", "Path to player.yaml config file. Default search: $SENDSPIN_PLAYER_CONFIG, ~/.config/sendspin/player.yaml, /etc/sendspin/player.yaml.")
+	audioDevice    = flag.String("audio-device", "", "Playback device name (see --list-audio-devices). Empty = miniaudio default.")
+	listAudio      = flag.Bool("list-audio-devices", false, "List available playback devices and exit.")
 )
 
 func main() {
 	flag.Parse()
 
+	if *listAudio {
+		if err := printPlaybackDevices(os.Stdout); err != nil {
+			fmt.Fprintf(os.Stderr, "failed to list audio devices: %v\n", err)
+			os.Exit(1)
+		}
+		return
+	}
+
 	// Overlay YAML file and SENDSPIN_PLAYER_* env vars onto flag vars for
 	// anything the user didn't set on the CLI. client_id is handled
 	// separately below because it has its own resolver and persistence.
-	setByUser := map[string]bool{"client-id": true, "config": true}
+	// list-audio-devices is already handled above and exits early.
+	setByUser := map[string]bool{"client-id": true, "config": true, "list-audio-devices": true}
 	flag.Visit(func(f *flag.Flag) { setByUser[f.Name] = true })
 
 	cfg, loadedConfigPath, err := sendspin.LoadPlayerConfig(*configPath)
@@ -107,7 +119,21 @@ func main() {
 		volumeCtrl = ui.NewVolumeControl()
 		transportCtrl = ui.NewTransportControl()
 		var err error
-		tuiProg, err = ui.Run(volumeCtrl, transportCtrl)
+		// Hand the picker a writable config path — fall back to the OS
+		// default location if nothing was loaded, so selections still persist
+		// on first-ever launch.
+		uiConfigPath := loadedConfigPath
+		if uiConfigPath == "" {
+			if p, perr := sendspin.DefaultPlayerConfigPath(); perr == nil {
+				uiConfigPath = p
+			}
+		}
+		tuiProg, err = ui.Run(ui.Config{
+			VolumeCtrl:    volumeCtrl,
+			TransportCtrl: transportCtrl,
+			ConfigPath:    uiConfigPath,
+			AudioDevice:   *audioDevice,
+		})
 		if err != nil {
 			log.Fatalf("Failed to start TUI: %v", err)
 		}
@@ -167,6 +193,7 @@ func main() {
 		PreferredCodec: *preferredCodec,
 		BufferCapacity: *bufferCapacity,
 		ClientID:       resolvedClientID,
+		AudioDevice:    *audioDevice,
 		DeviceInfo: sendspin.DeviceInfo{
 			ProductName:     deviceProduct,
 			Manufacturer:    deviceManufacturer,
@@ -308,6 +335,32 @@ func handleTransportControl(player *sendspin.Player, ctrl *ui.TransportControl) 
 			log.Printf("Transport command %q failed: %v", cmd.Command, err)
 		}
 	}
+}
+
+// printPlaybackDevices enumerates every playback device miniaudio can see
+// and prints them in a format a user can copy/paste into --audio-device or
+// the audio_device: key in player.yaml. The '[*]' marker identifies the
+// device miniaudio considers its current default.
+func printPlaybackDevices(w io.Writer) error {
+	devices, err := output.ListPlaybackDevices()
+	if err != nil {
+		return err
+	}
+	if len(devices) == 0 {
+		fmt.Fprintln(w, "No playback devices found.")
+		return nil
+	}
+	fmt.Fprintln(w, "Playback devices:")
+	for _, d := range devices {
+		marker := "[ ]"
+		if d.IsDefault {
+			marker = "[*]"
+		}
+		fmt.Fprintf(w, "  %s %s\n", marker, d.Name)
+	}
+	fmt.Fprintln(w)
+	fmt.Fprintln(w, "[*] = current default. Use --audio-device \"<name>\" or set audio_device: in player.yaml.")
+	return nil
 }
 
 // resolveClientID chooses the player's client_id and arranges for it to be

@@ -83,3 +83,11 @@
 
 # Log file path. Ignored when daemon mode is on.
 # log_file: "sendspin-player.log"
+
+# Playback device name. Leave unset to let miniaudio pick its default sink.
+# To see available devices on this host, run:
+#   sendspin-player --list-audio-devices
+# The name must match exactly. If it doesn't match, the player refuses to
+# start and lists every available device — silent fallback would defeat the
+# point of setting this key.
+# audio_device: "USB Audio Device"

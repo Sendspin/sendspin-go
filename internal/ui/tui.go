@@ -32,17 +32,34 @@ func NewTransportControl() *TransportControl {
 	}
 }
 
-func NewModel(volCtrl *VolumeControl, transportCtrl *TransportControl) Model {
+// Config bundles everything the TUI needs from main.go at construction.
+// Extending by adding fields is intentionally cheap — the alternative was
+// growing the Run() / NewModel() positional argument list every time a new
+// TUI feature needs a dependency.
+type Config struct {
+	VolumeCtrl    *VolumeControl
+	TransportCtrl *TransportControl
+	// ConfigPath is where WriteStringKey persists settings like audio_device.
+	// Empty disables the Save action in modals that would write to disk.
+	ConfigPath string
+	// AudioDevice is the device currently driving playback, shown in the
+	// status line and used to seed the picker's highlighted row.
+	AudioDevice string
+}
+
+func NewModel(cfg Config) Model {
 	return Model{
 		volume:        100,
 		state:         "idle",
 		playbackState: "idle",
-		volumeCtrl:    volCtrl,
-		transportCtrl: transportCtrl,
+		volumeCtrl:    cfg.VolumeCtrl,
+		transportCtrl: cfg.TransportCtrl,
+		configPath:    cfg.ConfigPath,
+		audioDevice:   cfg.AudioDevice,
 	}
 }
 
-func Run(volCtrl *VolumeControl, transportCtrl *TransportControl) (*tea.Program, error) {
-	p := tea.NewProgram(NewModel(volCtrl, transportCtrl), tea.WithAltScreen())
+func Run(cfg Config) (*tea.Program, error) {
+	p := tea.NewProgram(NewModel(cfg), tea.WithAltScreen())
 	return p, nil
 }
