@@ -36,12 +36,26 @@ var (
 	daemon         = flag.Bool("daemon", false, "Daemon mode: log to stdout only (journalctl-friendly), no TUI, no log file")
 	preferredCodec = flag.String("preferred-codec", "", "Preferred codec: pcm (default), opus, or flac")
 	bufferCapacity = flag.Int("buffer-capacity", 1048576, "Buffer capacity in bytes advertised to server (default: 1MB)")
-	clientID       = flag.String("client-id", "", "Override the persisted client_id. When set, the value is written to the client-id file and reused on subsequent launches.")
-	clientIDFile   = flag.String("client-id-file", "", "Override the path to the client_id config file (default: OS user config dir). Use a distinct path per instance to run multiple players on one host.")
+	clientID       = flag.String("client-id", "", "Override the persisted client_id. When set, the value is written to the config file and reused on subsequent launches.")
+	configPath     = flag.String("config", "", "Path to player.yaml config file. Default search: $SENDSPIN_PLAYER_CONFIG, ~/.config/sendspin/player.yaml, /etc/sendspin/player.yaml.")
 )
 
 func main() {
 	flag.Parse()
+
+	// Overlay YAML file and SENDSPIN_PLAYER_* env vars onto flag vars for
+	// anything the user didn't set on the CLI. client_id is handled
+	// separately below because it has its own resolver and persistence.
+	setByUser := map[string]bool{"client-id": true, "config": true}
+	flag.Visit(func(f *flag.Flag) { setByUser[f.Name] = true })
+
+	cfg, loadedConfigPath, err := sendspin.LoadPlayerConfig(*configPath)
+	if err != nil {
+		log.Fatalf("config: %v", err)
+	}
+	if err := sendspin.ApplyEnvAndFile(flag.CommandLine, setByUser, cfg); err != nil {
+		log.Fatalf("config overlay: %v", err)
+	}
 
 	// Use TUI if not explicitly disabled; -stream-logs and -daemon both imply -no-tui
 	useTUI := !(*noTUI || *streamLogs || *daemon)
@@ -139,6 +153,11 @@ func main() {
 		deviceManufacturer = *manufacturer
 	}
 
+	resolvedClientID, err := resolveClientID(*clientID, cfg, loadedConfigPath)
+	if err != nil {
+		log.Fatalf("client_id: %v", err)
+	}
+
 	config := sendspin.PlayerConfig{
 		ServerAddr:     serverAddress,
 		PlayerName:     playerName,
@@ -147,8 +166,7 @@ func main() {
 		StaticDelayMs:  *staticDelayMs,
 		PreferredCodec: *preferredCodec,
 		BufferCapacity: *bufferCapacity,
-		ClientID:       *clientID,
-		ConfigPath:     *clientIDFile,
+		ClientID:       resolvedClientID,
 		DeviceInfo: sendspin.DeviceInfo{
 			ProductName:     deviceProduct,
 			Manufacturer:    deviceManufacturer,
@@ -290,6 +308,40 @@ func handleTransportControl(player *sendspin.Player, ctrl *ui.TransportControl) 
 			log.Printf("Transport command %q failed: %v", cmd.Command, err)
 		}
 	}
+}
+
+// resolveClientID chooses the player's client_id and arranges for it to be
+// persisted to the config file when a new value is generated or when a CLI
+// override differs from the on-disk value. Separated from main() purely for
+// readability — this is the only place the three inputs (flag, file, MAC)
+// and the write-back path come together.
+func resolveClientID(override string, cfg *sendspin.PlayerConfigFile, loadedConfigPath string) (string, error) {
+	persistPath := loadedConfigPath
+	if persistPath == "" {
+		p, err := sendspin.DefaultPlayerConfigPath()
+		if err != nil {
+			// No writable config dir. Proceed without write-back; a generated
+			// UUID will be stable for this session only, and the log line from
+			// ResolveClientID will show (source: generated) with no "persisted".
+			log.Printf("client_id: no config path available for persistence: %v", err)
+		} else {
+			persistPath = p
+		}
+	}
+
+	var persist sendspin.PersistFn
+	if persistPath != "" {
+		persist = func(id string) error {
+			return sendspin.WriteStringKey(persistPath, "client_id", id)
+		}
+	}
+
+	var fromConfig string
+	if cfg != nil {
+		fromConfig = cfg.ClientID
+	}
+
+	return sendspin.ResolveClientID(override, fromConfig, persist)
 }
 
 func statsUpdateLoop(player *sendspin.Player, updateTUI func(ui.StatusMsg)) {

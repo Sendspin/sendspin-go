@@ -257,40 +257,80 @@ Connect to a specific server manually:
 
 #### Player Options
 
+- `--config` - Path to player.yaml config file. Default search: `$SENDSPIN_PLAYER_CONFIG`, `~/.config/sendspin/player.yaml`, `/etc/sendspin/player.yaml`.
 - `--server` - Manual server WebSocket address (skips mDNS discovery)
 - `--port` - Port for mDNS advertisement (default: 8927)
 - `--name` - Player friendly name (default: hostname-sendspin-player)
 - `--buffer-ms` - Jitter buffer size in milliseconds (default: 150)
 - `--log-file` - Log file path (default: sendspin-player.log)
-- `--client-id` - Override the persisted `client_id`. The value is written to the client-id file and reused on subsequent launches.
-- `--client-id-file` - Override the path to the client-id file (default: OS user config dir). Use a distinct path per instance to run multiple players on one host.
+- `--client-id` - Override the persisted `client_id`. When set, the value is written to the config file and reused on subsequent launches.
 - `--debug` - Enable debug logging
+
+#### Configuration File (`player.yaml`)
+
+Every CLI flag has a matching key in `player.yaml`. Keys use `snake_case` (`--buffer-ms` ↔ `buffer_ms`).
+
+**Search order** (first existing file wins; missing is not an error):
+
+1. `--config <path>` flag
+2. `$SENDSPIN_PLAYER_CONFIG`
+3. `~/.config/sendspin/player.yaml` (macOS: `~/Library/Application Support/sendspin/player.yaml`; Windows: `%AppData%\sendspin\player.yaml`)
+4. `/etc/sendspin/player.yaml` (daemon/system-wide)
+
+**Value precedence**, for every flag:
+
+1. CLI flag if passed
+2. Env var `SENDSPIN_PLAYER_<UPPER_SNAKE>` (e.g. `SENDSPIN_PLAYER_BUFFER_MS=200`)
+3. Config file key
+4. Built-in default
+
+**Example `player.yaml`:**
+
+```yaml
+# Identity
+name:       "Living Room"
+client_id:  "aa:bb:cc:dd:ee:ff"    # auto-derived from MAC if unset
+
+# Network
+server: ""                          # empty = use mDNS
+port:   8927
+
+# Audio
+buffer_ms:       150
+static_delay_ms: 0
+preferred_codec: ""                 # pcm (default), opus, flac
+buffer_capacity: 1048576
+
+# Device identity (shown in Music Assistant)
+product_name: ""
+manufacturer: ""
+
+# Behavior
+no_reconnect: false
+daemon:       false
+no_tui:       false
+log_file:     "sendspin-player.log"
+```
 
 #### Player Identity (`client_id`)
 
-The player sends a stable `client_id` to the server so controllers like Music Assistant treat it as the same player across restarts. Resolution order:
+The player sends a stable `client_id` so controllers like Music Assistant recognize it as the same player across restarts. Resolution order:
 
-1. `--client-id` flag (when set, also persisted to the client-id file)
-2. Persisted value from the client-id file
+1. `--client-id` flag (when set, also persisted to the config file as `client_id`)
+2. `client_id` key in the loaded `player.yaml`
 3. MAC address of the primary network interface (`xx:xx:xx:xx:xx:xx`)
-4. Freshly generated UUID (written to the client-id file and reused next launch)
+4. Freshly generated UUID (written to `player.yaml` as `client_id` and reused next launch)
 
-Default client-id file location:
+Removing `client_id` from `player.yaml` causes the next launch to re-derive, which the server will see as a new player.
 
-- Linux / Raspberry Pi: `~/.config/sendspin-player/client-id`
-- macOS: `~/Library/Application Support/sendspin-player/client-id`
-- Windows: `%AppData%\sendspin-player\client-id`
-
-Deleting this file causes the next launch to re-derive a `client_id`, which the server will see as a new player.
-
-Running two players on the same host:
+Running multiple players on one host:
 
 ```bash
-./sendspin-player --name "Kitchen"  --client-id-file ~/.config/sendspin-player/kitchen.id &
-./sendspin-player --name "Bedroom"  --client-id-file ~/.config/sendspin-player/bedroom.id &
+./sendspin-player --name "Kitchen" --config ~/.config/sendspin/kitchen.yaml &
+./sendspin-player --name "Bedroom" --config ~/.config/sendspin/bedroom.yaml &
 ```
 
-Each instance resolves and persists its identity independently.
+Each config file holds its own `client_id`, so the two instances register as two distinct players.
 
 #### Player TUI
 

@@ -1,10 +1,9 @@
-// ABOUTME: Tests for ResolveClientID precedence, MAC picker filter, and atomic file persistence
+// ABOUTME: Tests for ResolveClientID precedence and the MAC picker filter
 package sendspin
 
 import (
+	"errors"
 	"net"
-	"os"
-	"path/filepath"
 	"testing"
 )
 
@@ -113,53 +112,14 @@ func TestPickStableMAC(t *testing.T) {
 	}
 }
 
-func TestPersistedClientID_RoundTrip(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "sendspin-player", "client-id")
-
-	if _, ok := readPersistedClientID(path); ok {
-		t.Fatal("read on nonexistent file should return ok=false")
-	}
-
-	if err := writePersistedClientID(path, "my-id-1234"); err != nil {
-		t.Fatalf("first write: %v", err)
-	}
-	got, ok := readPersistedClientID(path)
-	if !ok || got != "my-id-1234" {
-		t.Errorf("after first write: ok=%v got=%q, want my-id-1234", ok, got)
-	}
-
-	if err := writePersistedClientID(path, "my-id-5678"); err != nil {
-		t.Fatalf("overwrite: %v", err)
-	}
-	got, _ = readPersistedClientID(path)
-	if got != "my-id-5678" {
-		t.Errorf("after overwrite: got=%q, want my-id-5678", got)
-	}
-
-	if _, err := os.Stat(path + ".tmp"); !os.IsNotExist(err) {
-		t.Errorf("tempfile should have been renamed, stat err = %v", err)
-	}
+type persistRecorder struct {
+	calls []string
+	err   error
 }
 
-func TestPersistedClientID_TrimsWhitespace(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "client-id")
-	if err := os.WriteFile(path, []byte("  padded-id\n\n"), 0o600); err != nil {
-		t.Fatalf("seed: %v", err)
-	}
-	got, ok := readPersistedClientID(path)
-	if !ok || got != "padded-id" {
-		t.Errorf("got=%q ok=%v, want padded-id true", got, ok)
-	}
-}
-
-func TestPersistedClientID_EmptyFileIsNotUsed(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "client-id")
-	if err := os.WriteFile(path, []byte("\n  \n"), 0o600); err != nil {
-		t.Fatalf("seed: %v", err)
-	}
-	if _, ok := readPersistedClientID(path); ok {
-		t.Error("whitespace-only file should be treated as absent")
-	}
+func (p *persistRecorder) persist(id string) error {
+	p.calls = append(p.calls, id)
+	return p.err
 }
 
 func withStubInterfaces(t *testing.T, stub func() []net.Interface) {
@@ -169,141 +129,116 @@ func withStubInterfaces(t *testing.T, stub func() []net.Interface) {
 	t.Cleanup(func() { allInterfaces = prev })
 }
 
-func TestResolveClientIDFrom_OverrideWinsAndPersists(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "client-id")
+func TestResolveClientID_OverrideWinsAndPersistsWhenDifferent(t *testing.T) {
+	rec := &persistRecorder{}
 
-	id, err := resolveClientIDFrom("my-override", path)
+	id, err := ResolveClientID("my-override", "", rec.persist)
 	if err != nil {
 		t.Fatalf("resolve: %v", err)
 	}
 	if id != "my-override" {
 		t.Errorf("id = %q, want my-override", id)
 	}
-	persisted, ok := readPersistedClientID(path)
-	if !ok || persisted != "my-override" {
-		t.Errorf("override not persisted: ok=%v, persisted=%q", ok, persisted)
+	if len(rec.calls) != 1 || rec.calls[0] != "my-override" {
+		t.Errorf("persist calls = %v, want [my-override]", rec.calls)
 	}
 }
 
-func TestResolveClientIDFrom_OverrideReplacesExistingFile(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "client-id")
-	if err := writePersistedClientID(path, "stale-id"); err != nil {
-		t.Fatalf("seed: %v", err)
-	}
+func TestResolveClientID_OverrideMatchingConfigDoesNotPersist(t *testing.T) {
+	rec := &persistRecorder{}
 
-	id, err := resolveClientIDFrom("fresh-override", path)
+	id, err := ResolveClientID("same-id", "same-id", rec.persist)
 	if err != nil {
 		t.Fatalf("resolve: %v", err)
 	}
-	if id != "fresh-override" {
-		t.Errorf("id = %q, want fresh-override", id)
+	if id != "same-id" {
+		t.Errorf("id = %q, want same-id", id)
 	}
-	persisted, _ := readPersistedClientID(path)
-	if persisted != "fresh-override" {
-		t.Errorf("file still has %q, want fresh-override", persisted)
+	if len(rec.calls) != 0 {
+		t.Errorf("persist calls = %v, want no-op when override matches config", rec.calls)
 	}
 }
 
-func TestResolveClientIDFrom_PersistedBeatsMAC(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "client-id")
-	if err := writePersistedClientID(path, "persisted-id"); err != nil {
-		t.Fatalf("seed: %v", err)
-	}
+func TestResolveClientID_ConfigBeatsMAC(t *testing.T) {
+	rec := &persistRecorder{}
 	withStubInterfaces(t, func() []net.Interface {
 		return []net.Interface{
 			{Name: "eth0", Flags: net.FlagUp, HardwareAddr: mac(0xaa, 0xbb, 0xcc, 0xdd, 0xee, 0xff)},
 		}
 	})
 
-	id, err := resolveClientIDFrom("", path)
+	id, err := ResolveClientID("", "from-config", rec.persist)
 	if err != nil {
 		t.Fatalf("resolve: %v", err)
 	}
-	if id != "persisted-id" {
-		t.Errorf("id = %q, want persisted-id (persisted must beat MAC)", id)
+	if id != "from-config" {
+		t.Errorf("id = %q, want from-config (config must beat MAC)", id)
+	}
+	if len(rec.calls) != 0 {
+		t.Errorf("persist calls = %v, want none (config path uses as-is)", rec.calls)
 	}
 }
 
-func TestResolveClientIDFrom_MACWhenNoPersistedValue(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "client-id")
+func TestResolveClientID_MACNotPersisted(t *testing.T) {
+	rec := &persistRecorder{}
 	withStubInterfaces(t, func() []net.Interface {
 		return []net.Interface{
 			{Name: "eth0", Flags: net.FlagUp, HardwareAddr: mac(0xaa, 0xbb, 0xcc, 0xdd, 0xee, 0xff)},
 		}
 	})
 
-	id, err := resolveClientIDFrom("", path)
+	id, err := ResolveClientID("", "", rec.persist)
 	if err != nil {
 		t.Fatalf("resolve: %v", err)
 	}
 	if id != "aa:bb:cc:dd:ee:ff" {
 		t.Errorf("id = %q, want MAC", id)
 	}
-	if _, ok := readPersistedClientID(path); ok {
-		t.Error("MAC-derived id should not be written to the config file")
+	if len(rec.calls) != 0 {
+		t.Errorf("persist calls = %v, want none (MAC is inherently stable)", rec.calls)
 	}
 }
 
-func TestResolveClientIDFrom_GeneratedUUIDIsPersisted(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "client-id")
+func TestResolveClientID_GeneratedUUIDPersisted(t *testing.T) {
+	rec := &persistRecorder{}
 	withStubInterfaces(t, func() []net.Interface { return nil })
 
-	id, err := resolveClientIDFrom("", path)
+	id, err := ResolveClientID("", "", rec.persist)
 	if err != nil {
 		t.Fatalf("resolve: %v", err)
 	}
 	if id == "" {
 		t.Fatal("resolve returned empty id")
 	}
-	persisted, ok := readPersistedClientID(path)
-	if !ok {
-		t.Fatal("generated id should have been persisted")
-	}
-	if persisted != id {
-		t.Errorf("persisted=%q, returned=%q (must match)", persisted, id)
+	if len(rec.calls) != 1 || rec.calls[0] != id {
+		t.Errorf("persist calls = %v, want [%q]", rec.calls, id)
 	}
 }
 
-func TestResolveClientIDFrom_NoConfigPathStillReturnsID(t *testing.T) {
+func TestResolveClientID_NilPersistStillReturnsID(t *testing.T) {
 	withStubInterfaces(t, func() []net.Interface { return nil })
 
-	id, err := resolveClientIDFrom("", "")
+	id, err := ResolveClientID("", "", nil)
 	if err != nil {
 		t.Fatalf("resolve: %v", err)
 	}
 	if id == "" {
-		t.Error("resolve with no persistence still must return a non-empty id")
+		t.Error("resolve with nil persist must still return a non-empty id")
 	}
 }
 
-// TestResolveClientID_ExplicitConfigPath verifies the public entry point
-// honors a caller-supplied path override, which is how --client-id-file
-// supports multiple instances on one host.
-func TestResolveClientID_ExplicitConfigPath(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "custom-id")
+func TestResolveClientID_PersistErrorIsNotFatal(t *testing.T) {
+	rec := &persistRecorder{err: errors.New("disk full")}
 	withStubInterfaces(t, func() []net.Interface { return nil })
 
-	id, err := ResolveClientID("", path)
+	id, err := ResolveClientID("", "", rec.persist)
 	if err != nil {
-		t.Fatalf("ResolveClientID: %v", err)
+		t.Fatalf("resolve should not fail when persist fails: %v", err)
 	}
 	if id == "" {
-		t.Fatal("id is empty")
+		t.Error("resolve returned empty id")
 	}
-	persisted, ok := readPersistedClientID(path)
-	if !ok {
-		t.Fatal("generated id not written to the override path")
-	}
-	if persisted != id {
-		t.Errorf("persisted=%q returned=%q", persisted, id)
-	}
-
-	// Second call should read from the same override path.
-	id2, err := ResolveClientID("", path)
-	if err != nil {
-		t.Fatalf("second ResolveClientID: %v", err)
-	}
-	if id2 != id {
-		t.Errorf("second resolve returned %q, want persisted %q", id2, id)
+	if len(rec.calls) != 1 {
+		t.Errorf("persist should have been attempted once, got %d calls", len(rec.calls))
 	}
 }
