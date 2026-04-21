@@ -36,3 +36,6 @@ output.txt
 sendspin-go
 resonate-go
 prompts/
+
+# Worktrees
+.worktrees/
