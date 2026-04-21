@@ -161,10 +161,17 @@ func ListPlaybackDevices() ([]PlaybackDevice, error) {
 // the list, else nil if the list is empty (caller falls back to whatever
 // miniaudio's default-config path does).
 //
-// Non-empty requested name -> exact match on Name. If no match: returns an
-// error whose message lists every available device name so the user can fix
-// the config. Fail-loud is intentional: silent fallback to default is the
-// behavior this feature exists to correct.
+// Non-empty requested name -> exact Name match first, then short-name match
+// (the text before the first ", "). Miniaudio's Linux/ALSA backend builds
+// device names from snd_device_name_hint's DESC field, which follows a
+// "<card-short>, <stream-description>" convention, so users naturally try
+// just the short part. If the short-name match is ambiguous, we error out
+// instead of picking one silently.
+//
+// Fail-loud on no-match: the error lists every available device name, each
+// quoted with %q so embedded commas are distinguishable from the list
+// separator. Silent fallback to default is the behavior this feature
+// exists to correct.
 func matchDevice(devices []PlaybackDevice, requested string) (*PlaybackDevice, error) {
 	if requested == "" {
 		if len(devices) == 0 {
@@ -182,15 +189,27 @@ func matchDevice(devices []PlaybackDevice, requested string) (*PlaybackDevice, e
 			return &devices[i], nil
 		}
 	}
+	var shortMatches []int
+	for i, d := range devices {
+		if idx := strings.Index(d.Name, ", "); idx > 0 && d.Name[:idx] == requested {
+			shortMatches = append(shortMatches, i)
+		}
+	}
+	if len(shortMatches) == 1 {
+		return &devices[shortMatches[0]], nil
+	}
 	if len(devices) == 0 {
 		return nil, fmt.Errorf("audio device %q not found (no playback devices available)", requested)
 	}
-	names := make([]string, 0, len(devices))
-	for _, d := range devices {
-		names = append(names, d.Name)
+	quoted := make([]string, len(devices))
+	for i, d := range devices {
+		quoted[i] = fmt.Sprintf("%q", d.Name)
 	}
-	sort.Strings(names)
-	return nil, fmt.Errorf("audio device %q not found; available: %s", requested, strings.Join(names, ", "))
+	sort.Strings(quoted)
+	if len(shortMatches) > 1 {
+		return nil, fmt.Errorf("audio device %q is ambiguous (matches %d devices by short name); use the full quoted name. Available: %s", requested, len(shortMatches), strings.Join(quoted, ", "))
+	}
+	return nil, fmt.Errorf("audio device %q not found; available: %s", requested, strings.Join(quoted, ", "))
 }
 
 func (m *Malgo) Open(sampleRate, channels, bitDepth int) error {
