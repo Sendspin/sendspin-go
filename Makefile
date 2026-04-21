@@ -54,7 +54,7 @@ lint:
 clean:
 	@echo "Cleaning binaries and artifacts..."
 	rm -f sendspin-player sendspin-server resonate-player resonate-server
-	rm -rf bin/ dist/
+	rm -rf bin/
 	rm -f coverage.out coverage.html
 
 # Install both binaries to GOPATH/bin
