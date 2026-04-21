@@ -356,10 +356,11 @@ func printPlaybackDevices(w io.Writer) error {
 		if d.IsDefault {
 			marker = "[*]"
 		}
-		fmt.Fprintf(w, "  %s %s\n", marker, d.Name)
+		fmt.Fprintf(w, "  %s %q\n", marker, d.Name)
 	}
 	fmt.Fprintln(w)
 	fmt.Fprintln(w, "[*] = current default. Use --audio-device \"<name>\" or set audio_device: in player.yaml.")
+	fmt.Fprintln(w, "On Linux, miniaudio names look like \"<short>, <description>\"; either the full name or just the short part before the comma will match.")
 	return nil
 }
 

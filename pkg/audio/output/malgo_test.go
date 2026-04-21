@@ -141,3 +141,92 @@ func TestMatchDevice_NoMatchEmptyCatalogGivesDistinctError(t *testing.T) {
 		t.Errorf("error should distinguish empty-catalog case: %q", msg)
 	}
 }
+
+// TestMatchDevice_ShortNameMatch covers miniaudio's Linux/ALSA naming where
+// device.name is "<card-short>, <stream-description>" — users typing just
+// the short prefix should match unambiguously when only one device has that
+// prefix. Reproduces the HiFiBerry case from the field bug.
+func TestMatchDevice_ShortNameMatch(t *testing.T) {
+	devices := []PlaybackDevice{
+		newDevice("Default Audio Device", true, 0x01),
+		newDevice("vc4-hdmi-0, MAI PCM i2s-hifi-0", false, 0x02),
+		newDevice("vc4-hdmi-1, MAI PCM i2s-hifi-0", false, 0x03),
+		newDevice("PDP Audio Device, USB Audio", false, 0x04),
+	}
+
+	got, err := matchDevice(devices, "vc4-hdmi-0")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if got == nil || got.ID[0] != 0x02 {
+		t.Errorf("short-name %q should resolve to id 0x02; got %+v", "vc4-hdmi-0", got)
+	}
+
+	got, err = matchDevice(devices, "PDP Audio Device")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if got == nil || got.ID[0] != 0x04 {
+		t.Errorf("short-name %q should resolve to id 0x04; got %+v", "PDP Audio Device", got)
+	}
+}
+
+// TestMatchDevice_ExactNameWinsOverShortName guards the precedence: if a
+// device's full name happens to equal someone else's short prefix, the
+// exact match takes priority over the short-name search.
+func TestMatchDevice_ExactNameWinsOverShortName(t *testing.T) {
+	devices := []PlaybackDevice{
+		newDevice("Foo, long description", false, 0x01),
+		newDevice("Foo", false, 0x02),
+	}
+
+	got, err := matchDevice(devices, "Foo")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if got == nil || got.ID[0] != 0x02 {
+		t.Errorf("exact match should win: expected id 0x02; got %+v", got)
+	}
+}
+
+// TestMatchDevice_ShortNameAmbiguousReturnsError covers the two-HiFiBerry
+// case: the same short prefix matches multiple devices. We must not silently
+// pick one.
+func TestMatchDevice_ShortNameAmbiguousReturnsError(t *testing.T) {
+	devices := []PlaybackDevice{
+		newDevice("HiFiBerry, card 0", false, 0x01),
+		newDevice("HiFiBerry, card 1", false, 0x02),
+	}
+
+	got, err := matchDevice(devices, "HiFiBerry")
+	if got != nil {
+		t.Errorf("expected nil on ambiguous short-name match, got %+v", got)
+	}
+	if err == nil {
+		t.Fatal("expected an error on ambiguous short-name match")
+	}
+	msg := err.Error()
+	if !strings.Contains(msg, "ambiguous") {
+		t.Errorf("error should mention ambiguity: %q", msg)
+	}
+	if !strings.Contains(msg, `"HiFiBerry, card 0"`) || !strings.Contains(msg, `"HiFiBerry, card 1"`) {
+		t.Errorf("ambiguity error should list both candidates quoted with %%q: %q", msg)
+	}
+}
+
+// TestMatchDevice_NoMatchQuotesNames ensures names with embedded commas are
+// distinguishable from the list separator in the error output.
+func TestMatchDevice_NoMatchQuotesNames(t *testing.T) {
+	devices := []PlaybackDevice{
+		newDevice("vc4-hdmi-0, MAI PCM i2s-hifi-0", false, 0x01),
+	}
+
+	_, err := matchDevice(devices, "nonexistent")
+	if err == nil {
+		t.Fatal("expected an error")
+	}
+	msg := err.Error()
+	if !strings.Contains(msg, `"vc4-hdmi-0, MAI PCM i2s-hifi-0"`) {
+		t.Errorf("name should appear quoted in error so embedded comma is unambiguous: %q", msg)
+	}
+}
