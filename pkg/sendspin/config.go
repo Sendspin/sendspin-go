@@ -87,14 +87,20 @@ func LoadPlayerConfig(explicitPath string) (*PlayerConfigFile, string, error) {
 	return &cfg, used, nil
 }
 
-// DefaultPlayerConfigPath returns the canonical user-level player.yaml path
-// for this OS. Used when we need to auto-create the config for write-back.
-func DefaultPlayerConfigPath() (string, error) {
+// userConfigPath returns <UserConfigDir>/sendspin/<relative>. Matches the
+// canonical path layout for both player.yaml and server.yaml.
+func userConfigPath(relative string) (string, error) {
 	dir, err := os.UserConfigDir()
 	if err != nil {
 		return "", fmt.Errorf("user config dir: %w", err)
 	}
-	return filepath.Join(dir, "sendspin", "player.yaml"), nil
+	return filepath.Join(dir, "sendspin", relative), nil
+}
+
+// DefaultPlayerConfigPath returns the canonical user-level player.yaml path
+// for this OS. Used when we need to auto-create the config for write-back.
+func DefaultPlayerConfigPath() (string, error) {
+	return userConfigPath("player.yaml")
 }
 
 func playerConfigSearchPaths(explicit string) []string {
@@ -105,8 +111,8 @@ func playerConfigSearchPaths(explicit string) []string {
 	if env := os.Getenv("SENDSPIN_PLAYER_CONFIG"); env != "" {
 		paths = append(paths, env)
 	}
-	if dir, err := os.UserConfigDir(); err == nil {
-		paths = append(paths, filepath.Join(dir, "sendspin", "player.yaml"))
+	if p, err := userConfigPath("player.yaml"); err == nil {
+		paths = append(paths, p)
 	}
 	paths = append(paths, "/etc/sendspin/player.yaml")
 	return paths
