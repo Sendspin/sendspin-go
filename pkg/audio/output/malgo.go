@@ -6,6 +6,7 @@ import (
 	"context"
 	"fmt"
 	"log"
+	"runtime"
 	"sort"
 	"strings"
 	"sync"
@@ -281,9 +282,23 @@ func (m *Malgo) Open(sampleRate, channels, bitDepth int) error {
 	if err != nil {
 		return err
 	}
+	// Hand miniaudio a pointer to the selected device ID, pinned across the
+	// cgo call so Go 1.21+'s pointer check accepts it.
+	//
+	// Pinning &chosen.ID[0] directly would fail: chosen is an element inside
+	// a []PlaybackDevice, and the containing heap object also holds the Go
+	// string Name — whose backing bytes are another Go pointer that cgo's
+	// recursive scan would find unpinned and reject. Copying the ID bytes
+	// into a standalone []byte isolates the pointer target: a byte slice's
+	// backing array contains only bytes (no further Go pointers), so the
+	// scan finds nothing to complain about.
+	var pinner runtime.Pinner
+	defer pinner.Unpin()
 	chosenLabel := "(miniaudio default)"
 	if chosen != nil {
-		deviceConfig.Playback.DeviceID = unsafe.Pointer(&chosen.ID[0])
+		idBuf := append([]byte(nil), chosen.ID[:]...)
+		pinner.Pin(&idBuf[0])
+		deviceConfig.Playback.DeviceID = unsafe.Pointer(&idBuf[0])
 		if chosen.IsDefault {
 			chosenLabel = fmt.Sprintf("%q (default)", chosen.Name)
 		} else {
