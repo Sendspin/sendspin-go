@@ -41,6 +41,30 @@ type PlayerConfigFile struct {
 	AudioDevice    string `yaml:"audio_device,omitempty"`
 }
 
+// loadYAMLConfig walks searchPaths, and for the first one that exists opens
+// the file and unmarshals into out. It returns the path that was loaded, or
+// empty if no candidate existed. A missing file is not an error; I/O or
+// parse errors are returned as-is with the offending path attached.
+func loadYAMLConfig(searchPaths []string, out any) (string, error) {
+	for _, candidate := range searchPaths {
+		if candidate == "" {
+			continue
+		}
+		data, err := os.ReadFile(candidate)
+		if err != nil {
+			if errors.Is(err, os.ErrNotExist) {
+				continue
+			}
+			return candidate, fmt.Errorf("read %s: %w", candidate, err)
+		}
+		if err := yaml.Unmarshal(data, out); err != nil {
+			return candidate, fmt.Errorf("parse %s: %w", candidate, err)
+		}
+		return candidate, nil
+	}
+	return "", nil
+}
+
 // LoadPlayerConfig searches for a player.yaml and returns its parsed contents
 // along with the path that was loaded (empty if none was found).
 //
@@ -52,24 +76,15 @@ type PlayerConfigFile struct {
 //
 // A missing file is not an error; the caller gets (nil, "", nil).
 func LoadPlayerConfig(explicitPath string) (*PlayerConfigFile, string, error) {
-	for _, candidate := range playerConfigSearchPaths(explicitPath) {
-		if candidate == "" {
-			continue
-		}
-		data, err := os.ReadFile(candidate)
-		if err != nil {
-			if errors.Is(err, os.ErrNotExist) {
-				continue
-			}
-			return nil, candidate, fmt.Errorf("read %s: %w", candidate, err)
-		}
-		var cfg PlayerConfigFile
-		if err := yaml.Unmarshal(data, &cfg); err != nil {
-			return nil, candidate, fmt.Errorf("parse %s: %w", candidate, err)
-		}
-		return &cfg, candidate, nil
+	var cfg PlayerConfigFile
+	used, err := loadYAMLConfig(playerConfigSearchPaths(explicitPath), &cfg)
+	if err != nil {
+		return nil, used, err
 	}
-	return nil, "", nil
+	if used == "" {
+		return nil, "", nil
+	}
+	return &cfg, used, nil
 }
 
 // DefaultPlayerConfigPath returns the canonical user-level player.yaml path
