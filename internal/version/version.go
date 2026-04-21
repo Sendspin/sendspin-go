@@ -3,7 +3,7 @@
 package version
 
 const (
-	Version      = "1.5.0"
+	Version      = "1.6.0"
 	Product      = "Sendspin Go Player"
 	Manufacturer = "sendspin-go"
 )
