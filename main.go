@@ -65,7 +65,7 @@ func main() {
 	if err != nil {
 		log.Fatalf("config: %v", err)
 	}
-	if err := sendspin.ApplyEnvAndFile(flag.CommandLine, setByUser, cfg); err != nil {
+	if err := sendspin.ApplyEnvAndFile(flag.CommandLine, setByUser, sendspin.PlayerEnvPrefix, cfg.AsStringMap()); err != nil {
 		log.Fatalf("config overlay: %v", err)
 	}
 

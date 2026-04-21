@@ -97,19 +97,23 @@ func playerConfigSearchPaths(explicit string) []string {
 	return paths
 }
 
-// ApplyEnvAndFile overlays SENDSPIN_PLAYER_* env vars and YAML config-file
-// values into the given FlagSet, but only for flags the user did NOT set on
-// the CLI. Precedence: CLI (untouched here) > env > file > flag default.
+// ApplyEnvAndFile overlays <envPrefix> env vars and YAML config-file values
+// into the given FlagSet, but only for flags the user did NOT set on the CLI.
+// Precedence: CLI (untouched here) > env > file > flag default.
+//
+// envPrefix is the namespace for env-var lookups (e.g. "SENDSPIN_PLAYER_").
+// fileValues is the flat flag-key → value map the caller derives from its
+// typed config struct (see PlayerConfigFile.AsStringMap and
+// ServerConfigFile.AsStringMap). A nil map is treated as empty.
 //
 // setByUser is typically built with flag.Visit before calling this.
-func ApplyEnvAndFile(fs *flag.FlagSet, setByUser map[string]bool, cfg *PlayerConfigFile) error {
-	configValues := cfg.asStringMap()
+func ApplyEnvAndFile(fs *flag.FlagSet, setByUser map[string]bool, envPrefix string, fileValues map[string]string) error {
 	var firstErr error
 	fs.VisitAll(func(f *flag.Flag) {
 		if firstErr != nil || setByUser[f.Name] {
 			return
 		}
-		envKey := PlayerEnvPrefix + strings.ToUpper(strings.ReplaceAll(f.Name, "-", "_"))
+		envKey := envPrefix + strings.ToUpper(strings.ReplaceAll(f.Name, "-", "_"))
 		if val, ok := os.LookupEnv(envKey); ok {
 			if err := fs.Set(f.Name, val); err != nil {
 				firstErr = fmt.Errorf("env %s -> -%s: %w", envKey, f.Name, err)
@@ -117,7 +121,7 @@ func ApplyEnvAndFile(fs *flag.FlagSet, setByUser map[string]bool, cfg *PlayerCon
 			return
 		}
 		configKey := strings.ReplaceAll(f.Name, "-", "_")
-		if val, ok := configValues[configKey]; ok {
+		if val, ok := fileValues[configKey]; ok {
 			if err := fs.Set(f.Name, val); err != nil {
 				firstErr = fmt.Errorf("config %s -> -%s: %w", configKey, f.Name, err)
 			}
@@ -126,10 +130,10 @@ func ApplyEnvAndFile(fs *flag.FlagSet, setByUser map[string]bool, cfg *PlayerCon
 	return firstErr
 }
 
-// asStringMap returns only the keys the user actually set in the YAML, as
+// AsStringMap returns only the keys the user actually set in the YAML, as
 // strings suitable for flag.Set. Absent keys are omitted so the overlay
 // correctly falls through to the flag default.
-func (c *PlayerConfigFile) asStringMap() map[string]string {
+func (c *PlayerConfigFile) AsStringMap() map[string]string {
 	m := make(map[string]string)
 	if c == nil {
 		return m
