@@ -25,24 +25,46 @@ var (
 	noTUI           = flag.Bool("no-tui", false, "Disable TUI, use streaming logs instead")
 	audioFile       = flag.String("audio", "", "Audio source to stream (MP3, FLAC, HTTP URL, HLS). Default: test tone")
 	discoverClients = flag.Bool("discover-clients", false, "Enable server-initiated discovery: browse _sendspin._tcp and dial out to clients")
+	daemon          = flag.Bool("daemon", false, "Daemon mode: log to stdout only (journalctl-friendly), no TUI, no log file")
+	configPath      = flag.String("config", "", "Path to server.yaml config file. Default search: $SENDSPIN_SERVER_CONFIG, ~/.config/sendspin/server.yaml, /etc/sendspin/server.yaml.")
 )
 
 func main() {
 	flag.Parse()
 
-	useTUI := !*noTUI
+	// Overlay YAML file and SENDSPIN_SERVER_* env vars onto flag vars for
+	// anything the user didn't set on the CLI. --config is excluded because
+	// putting it in the config file would be circular.
+	setByUser := map[string]bool{"config": true}
+	flag.Visit(func(f *flag.Flag) { setByUser[f.Name] = true })
 
-	f, err := os.OpenFile(*logFile, os.O_WRONLY|os.O_CREATE|os.O_APPEND, 0600)
+	cfg, _, err := sendspin.LoadServerConfig(*configPath)
 	if err != nil {
-		log.Fatalf("error opening log file: %v", err)
+		log.Fatalf("config: %v", err)
 	}
-	defer f.Close()
+	if err := sendspin.ApplyEnvAndFile(flag.CommandLine, setByUser, sendspin.ServerEnvPrefix, cfg.AsStringMap()); err != nil {
+		log.Fatalf("config overlay: %v", err)
+	}
 
-	if useTUI {
-		// Log to file only when TUI is running; otherwise the log would stomp the TUI
-		log.SetOutput(f)
+	useTUI := !(*noTUI || *daemon)
+
+	if *daemon {
+		// Daemon mode: log to stdout only. systemd/journalctl captures stdout
+		// and adds its own timestamps, so we keep ours for grep-ability.
+		log.SetOutput(os.Stdout)
 	} else {
-		log.SetOutput(io.MultiWriter(os.Stdout, f))
+		f, err := os.OpenFile(*logFile, os.O_WRONLY|os.O_CREATE|os.O_APPEND, 0600)
+		if err != nil {
+			log.Fatalf("error opening log file: %v", err)
+		}
+		defer f.Close()
+
+		if useTUI {
+			// Log to file only when TUI is running; otherwise the log would stomp the TUI
+			log.SetOutput(f)
+		} else {
+			log.SetOutput(io.MultiWriter(os.Stdout, f))
+		}
 	}
 
 	serverName := *name
@@ -56,6 +78,9 @@ func main() {
 
 	if !useTUI {
 		log.Printf("Starting Sendspin Server: %s on port %d", serverName, *port)
+		if *daemon {
+			log.Printf("Daemon mode: logging to stdout only")
+		}
 	}
 
 	var source sendspin.AudioSource
