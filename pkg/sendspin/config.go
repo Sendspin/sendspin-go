@@ -1,4 +1,4 @@
-// ABOUTME: YAML config-file support for the player (paths, env overlay, write-back)
+// ABOUTME: YAML config-file support for the player and server (paths, env overlay, write-back)
 // ABOUTME: Flat keys 1:1 with CLI flags; precedence CLI > env > file > built-in default
 package sendspin
 
