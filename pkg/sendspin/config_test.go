@@ -148,7 +148,7 @@ func TestApplyEnvAndFile_FileFillsUnsetFlags(t *testing.T) {
 		NoTUI:  &noTUI,
 	}
 
-	if err := ApplyEnvAndFile(fs, setByUser, cfg); err != nil {
+	if err := ApplyEnvAndFile(fs, setByUser, PlayerEnvPrefix, cfg.AsStringMap()); err != nil {
 		t.Fatalf("apply: %v", err)
 	}
 	if *strs["name"] != "CLI-Name" {
@@ -183,7 +183,7 @@ func TestApplyEnvAndFile_EnvBeatsFile(t *testing.T) {
 		Port:   &port,
 	}
 
-	if err := ApplyEnvAndFile(fs, map[string]bool{}, cfg); err != nil {
+	if err := ApplyEnvAndFile(fs, map[string]bool{}, PlayerEnvPrefix, cfg.AsStringMap()); err != nil {
 		t.Fatalf("apply: %v", err)
 	}
 	if *strs["server"] != "env.example:9999" {
@@ -201,7 +201,7 @@ func TestApplyEnvAndFile_NilConfigStillHonorsEnv(t *testing.T) {
 	}
 	t.Setenv("SENDSPIN_PLAYER_NAME", "env-only")
 
-	if err := ApplyEnvAndFile(fs, map[string]bool{}, nil); err != nil {
+	if err := ApplyEnvAndFile(fs, map[string]bool{}, PlayerEnvPrefix, nil); err != nil {
 		t.Fatalf("apply: %v", err)
 	}
 	if *strs["name"] != "env-only" {
@@ -216,7 +216,7 @@ func TestApplyEnvAndFile_InvalidEnvReturnsError(t *testing.T) {
 	}
 	t.Setenv("SENDSPIN_PLAYER_PORT", "not-a-number")
 
-	err := ApplyEnvAndFile(fs, map[string]bool{}, nil)
+	err := ApplyEnvAndFile(fs, map[string]bool{}, PlayerEnvPrefix, nil)
 	if err == nil {
 		t.Fatal("expected error on invalid env int")
 	}

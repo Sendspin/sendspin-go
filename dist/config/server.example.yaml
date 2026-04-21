@@ -1,0 +1,62 @@
+# sendspin-server configuration
+#
+# Search order (first existing file wins; missing is not an error):
+#   1. --config <path>
+#   2. $SENDSPIN_SERVER_CONFIG
+#   3. ~/.config/sendspin/server.yaml           (user install)
+#   4. /etc/sendspin/server.yaml                (daemon / system-wide)
+#
+# Per-value precedence for every key below:
+#   CLI flag > SENDSPIN_SERVER_<UPPER_SNAKE> env > this file > built-in default
+#
+# Every key is optional. Uncomment and adjust as needed.
+
+# ---------------------------------------------------------------------------
+# Identity
+# ---------------------------------------------------------------------------
+
+# Friendly name shown in Music Assistant and via mDNS.
+# Default: <hostname>-sendspin-server
+# name: "Living Room Server"
+
+# ---------------------------------------------------------------------------
+# Network
+# ---------------------------------------------------------------------------
+
+# WebSocket server port.
+# port: 8927
+
+# Disable mDNS advertisement. Clients must then connect manually.
+# no_mdns: false
+
+# Enable server-initiated discovery: browse _sendspin._tcp and dial out
+# to clients. Useful for players that can't initiate connections.
+# discover_clients: false
+
+# ---------------------------------------------------------------------------
+# Audio source
+# ---------------------------------------------------------------------------
+
+# Local file path, HTTP URL, or HLS URL. Empty = built-in test tone.
+# Examples:
+#   audio: "/srv/music/ambient.flac"
+#   audio: "http://example.com/stream.mp3"
+#   audio: "https://stream.radiofrance.fr/fip/fip.m3u8"
+# audio: ""
+
+# ---------------------------------------------------------------------------
+# Runtime / logging
+# ---------------------------------------------------------------------------
+
+# Daemon mode: log to stdout only (journalctl-friendly), no TUI, no log
+# file. Recommended when running under systemd.
+# daemon: false
+
+# Disable the interactive terminal UI, stream logs to stdout instead.
+# no_tui: false
+
+# Log file path. Ignored when daemon mode is on.
+# log_file: "sendspin-server.log"
+
+# Enable verbose debug logging.
+# debug: false

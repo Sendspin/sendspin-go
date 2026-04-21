@@ -2,7 +2,10 @@
 # ABOUTME: Provides targets for building, testing, and cleaning binaries
 
 .PHONY: all build player server test test-verbose test-coverage lint clean install \
-	build-all build-linux build-darwin help conformance install-daemon uninstall-daemon
+	build-all build-linux build-darwin help conformance \
+	install-daemon uninstall-daemon \
+	install-player-daemon uninstall-player-daemon \
+	install-server-daemon uninstall-server-daemon
 
 # Version from git tag or default
 VERSION ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo "dev")
@@ -51,7 +54,7 @@ lint:
 clean:
 	@echo "Cleaning binaries and artifacts..."
 	rm -f sendspin-player sendspin-server resonate-player resonate-server
-	rm -rf bin/ dist/
+	rm -rf bin/
 	rm -f coverage.out coverage.html
 
 # Install both binaries to GOPATH/bin
@@ -81,8 +84,8 @@ build-darwin:
 	GOOS=darwin GOARCH=amd64 go build -ldflags "$(LDFLAGS)" -o bin/sendspin-server-darwin-amd64 ./cmd/sendspin-server
 	GOOS=darwin GOARCH=arm64 go build -ldflags "$(LDFLAGS)" -o bin/sendspin-server-darwin-arm64 ./cmd/sendspin-server
 
-# Install as a systemd daemon (Linux only, requires root)
-install-daemon: player
+# Install sendspin-player as a systemd daemon
+install-player-daemon: player
 	@echo "Installing sendspin-player daemon..."
 	install -m 755 sendspin-player /usr/local/bin/sendspin-player
 	install -m 644 dist/systemd/sendspin-player.service /etc/systemd/system/sendspin-player.service
@@ -106,8 +109,36 @@ install-daemon: player
 	@echo ""
 	@echo "Configure via /etc/sendspin/player.yaml (preferred) or /etc/default/sendspin-player"
 
-# Uninstall the systemd daemon
-uninstall-daemon:
+# Install sendspin-server as a systemd daemon
+install-server-daemon: server
+	@echo "Installing sendspin-server daemon..."
+	install -m 755 sendspin-server /usr/local/bin/sendspin-server
+	install -m 644 dist/systemd/sendspin-server.service /etc/systemd/system/sendspin-server.service
+	@if [ ! -f /etc/default/sendspin-server ]; then \
+		install -m 644 dist/systemd/sendspin-server.env /etc/default/sendspin-server; \
+		echo "Created /etc/default/sendspin-server — edit this file to configure."; \
+	else \
+		echo "/etc/default/sendspin-server already exists, not overwriting."; \
+	fi
+	@if [ ! -f /etc/sendspin/server.yaml ]; then \
+		install -d -m 755 /etc/sendspin; \
+		install -m 644 dist/config/server.example.yaml /etc/sendspin/server.yaml; \
+		echo "Created /etc/sendspin/server.yaml — edit this file to configure."; \
+	else \
+		echo "/etc/sendspin/server.yaml already exists, not overwriting."; \
+	fi
+	systemctl daemon-reload
+	@echo ""
+	@echo "Installed. To start:"
+	@echo "  sudo systemctl enable --now sendspin-server"
+	@echo ""
+	@echo "Configure via /etc/sendspin/server.yaml (preferred) or /etc/default/sendspin-server"
+
+# Aggregate: install both binaries as systemd daemons
+install-daemon: install-player-daemon install-server-daemon
+
+# Uninstall the sendspin-player systemd daemon
+uninstall-player-daemon:
 	@echo "Removing sendspin-player daemon..."
 	-systemctl stop sendspin-player 2>/dev/null
 	-systemctl disable sendspin-player 2>/dev/null
@@ -115,6 +146,19 @@ uninstall-daemon:
 	rm -f /usr/local/bin/sendspin-player
 	systemctl daemon-reload
 	@echo "Removed. /etc/default/sendspin-player and /etc/sendspin/player.yaml left in place (manual cleanup if desired)."
+
+# Uninstall the sendspin-server systemd daemon
+uninstall-server-daemon:
+	@echo "Removing sendspin-server daemon..."
+	-systemctl stop sendspin-server 2>/dev/null
+	-systemctl disable sendspin-server 2>/dev/null
+	rm -f /etc/systemd/system/sendspin-server.service
+	rm -f /usr/local/bin/sendspin-server
+	systemctl daemon-reload
+	@echo "Removed. /etc/default/sendspin-server and /etc/sendspin/server.yaml left in place (manual cleanup if desired)."
+
+# Aggregate: uninstall both daemons
+uninstall-daemon: uninstall-player-daemon uninstall-server-daemon
 
 # Conformance test suite — runs the Sendspin protocol conformance harness
 # against the local sendspin-go checkout. Mirrors what CI does so contributors
@@ -165,8 +209,12 @@ help:
 	@echo "  make build-all    - Build all platforms"
 	@echo "  make build-linux  - Build Linux binaries"
 	@echo "  make build-darwin - Build macOS binaries"
-	@echo "  make install-daemon   - Install as systemd service (Linux, requires root)"
-	@echo "  make uninstall-daemon - Remove systemd service"
+	@echo "  make install-daemon           - Install both player and server as systemd daemons (Linux, requires root)"
+	@echo "  make install-player-daemon    - Install only the player daemon"
+	@echo "  make install-server-daemon    - Install only the server daemon"
+	@echo "  make uninstall-daemon         - Remove both daemons"
+	@echo "  make uninstall-player-daemon  - Remove only the player daemon"
+	@echo "  make uninstall-server-daemon  - Remove only the server daemon"
 	@echo "  make conformance  - Run protocol conformance suite (clones ../conformance on first run)"
 	@echo ""
 	@echo "Version: $(VERSION)"

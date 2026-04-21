@@ -1,4 +1,4 @@
-// ABOUTME: YAML config-file support for the player (paths, env overlay, write-back)
+// ABOUTME: YAML config-file support for the player and server (paths, env overlay, write-back)
 // ABOUTME: Flat keys 1:1 with CLI flags; precedence CLI > env > file > built-in default
 package sendspin
 
@@ -41,6 +41,30 @@ type PlayerConfigFile struct {
 	AudioDevice    string `yaml:"audio_device,omitempty"`
 }
 
+// loadYAMLConfig walks searchPaths, and for the first one that exists opens
+// the file and unmarshals into out. It returns the path that was loaded, or
+// empty if no candidate existed. A missing file is not an error; I/O or
+// parse errors are returned as-is with the offending path attached.
+func loadYAMLConfig(searchPaths []string, out any) (string, error) {
+	for _, candidate := range searchPaths {
+		if candidate == "" {
+			continue
+		}
+		data, err := os.ReadFile(candidate)
+		if err != nil {
+			if errors.Is(err, os.ErrNotExist) {
+				continue
+			}
+			return candidate, fmt.Errorf("read %s: %w", candidate, err)
+		}
+		if err := yaml.Unmarshal(data, out); err != nil {
+			return candidate, fmt.Errorf("parse %s: %w", candidate, err)
+		}
+		return candidate, nil
+	}
+	return "", nil
+}
+
 // LoadPlayerConfig searches for a player.yaml and returns its parsed contents
 // along with the path that was loaded (empty if none was found).
 //
@@ -52,34 +76,31 @@ type PlayerConfigFile struct {
 //
 // A missing file is not an error; the caller gets (nil, "", nil).
 func LoadPlayerConfig(explicitPath string) (*PlayerConfigFile, string, error) {
-	for _, candidate := range playerConfigSearchPaths(explicitPath) {
-		if candidate == "" {
-			continue
-		}
-		data, err := os.ReadFile(candidate)
-		if err != nil {
-			if errors.Is(err, os.ErrNotExist) {
-				continue
-			}
-			return nil, candidate, fmt.Errorf("read %s: %w", candidate, err)
-		}
-		var cfg PlayerConfigFile
-		if err := yaml.Unmarshal(data, &cfg); err != nil {
-			return nil, candidate, fmt.Errorf("parse %s: %w", candidate, err)
-		}
-		return &cfg, candidate, nil
+	var cfg PlayerConfigFile
+	used, err := loadYAMLConfig(playerConfigSearchPaths(explicitPath), &cfg)
+	if err != nil {
+		return nil, used, err
 	}
-	return nil, "", nil
+	if used == "" {
+		return nil, "", nil
+	}
+	return &cfg, used, nil
+}
+
+// userConfigPath returns <UserConfigDir>/sendspin/<relative>. Matches the
+// canonical path layout for both player.yaml and server.yaml.
+func userConfigPath(relative string) (string, error) {
+	dir, err := os.UserConfigDir()
+	if err != nil {
+		return "", fmt.Errorf("user config dir: %w", err)
+	}
+	return filepath.Join(dir, "sendspin", relative), nil
 }
 
 // DefaultPlayerConfigPath returns the canonical user-level player.yaml path
 // for this OS. Used when we need to auto-create the config for write-back.
 func DefaultPlayerConfigPath() (string, error) {
-	dir, err := os.UserConfigDir()
-	if err != nil {
-		return "", fmt.Errorf("user config dir: %w", err)
-	}
-	return filepath.Join(dir, "sendspin", "player.yaml"), nil
+	return userConfigPath("player.yaml")
 }
 
 func playerConfigSearchPaths(explicit string) []string {
@@ -90,26 +111,30 @@ func playerConfigSearchPaths(explicit string) []string {
 	if env := os.Getenv("SENDSPIN_PLAYER_CONFIG"); env != "" {
 		paths = append(paths, env)
 	}
-	if dir, err := os.UserConfigDir(); err == nil {
-		paths = append(paths, filepath.Join(dir, "sendspin", "player.yaml"))
+	if p, err := userConfigPath("player.yaml"); err == nil {
+		paths = append(paths, p)
 	}
 	paths = append(paths, "/etc/sendspin/player.yaml")
 	return paths
 }
 
-// ApplyEnvAndFile overlays SENDSPIN_PLAYER_* env vars and YAML config-file
-// values into the given FlagSet, but only for flags the user did NOT set on
-// the CLI. Precedence: CLI (untouched here) > env > file > flag default.
+// ApplyEnvAndFile overlays <envPrefix> env vars and YAML config-file values
+// into the given FlagSet, but only for flags the user did NOT set on the CLI.
+// Precedence: CLI (untouched here) > env > file > flag default.
+//
+// envPrefix is the namespace for env-var lookups (e.g. "SENDSPIN_PLAYER_").
+// fileValues is the flat flag-key → value map the caller derives from its
+// typed config struct (see PlayerConfigFile.AsStringMap and
+// ServerConfigFile.AsStringMap). A nil map is treated as empty.
 //
 // setByUser is typically built with flag.Visit before calling this.
-func ApplyEnvAndFile(fs *flag.FlagSet, setByUser map[string]bool, cfg *PlayerConfigFile) error {
-	configValues := cfg.asStringMap()
+func ApplyEnvAndFile(fs *flag.FlagSet, setByUser map[string]bool, envPrefix string, fileValues map[string]string) error {
 	var firstErr error
 	fs.VisitAll(func(f *flag.Flag) {
 		if firstErr != nil || setByUser[f.Name] {
 			return
 		}
-		envKey := PlayerEnvPrefix + strings.ToUpper(strings.ReplaceAll(f.Name, "-", "_"))
+		envKey := envPrefix + strings.ToUpper(strings.ReplaceAll(f.Name, "-", "_"))
 		if val, ok := os.LookupEnv(envKey); ok {
 			if err := fs.Set(f.Name, val); err != nil {
 				firstErr = fmt.Errorf("env %s -> -%s: %w", envKey, f.Name, err)
@@ -117,7 +142,7 @@ func ApplyEnvAndFile(fs *flag.FlagSet, setByUser map[string]bool, cfg *PlayerCon
 			return
 		}
 		configKey := strings.ReplaceAll(f.Name, "-", "_")
-		if val, ok := configValues[configKey]; ok {
+		if val, ok := fileValues[configKey]; ok {
 			if err := fs.Set(f.Name, val); err != nil {
 				firstErr = fmt.Errorf("config %s -> -%s: %w", configKey, f.Name, err)
 			}
@@ -126,10 +151,10 @@ func ApplyEnvAndFile(fs *flag.FlagSet, setByUser map[string]bool, cfg *PlayerCon
 	return firstErr
 }
 
-// asStringMap returns only the keys the user actually set in the YAML, as
+// AsStringMap returns only the keys the user actually set in the YAML, as
 // strings suitable for flag.Set. Absent keys are omitted so the overlay
 // correctly falls through to the flag default.
-func (c *PlayerConfigFile) asStringMap() map[string]string {
+func (c *PlayerConfigFile) AsStringMap() map[string]string {
 	m := make(map[string]string)
 	if c == nil {
 		return m
@@ -240,6 +265,107 @@ func setOrAppendStringKey(mapping *yaml.Node, key, value string) {
 		&yaml.Node{Kind: yaml.ScalarNode, Tag: "!!str", Value: key},
 		&yaml.Node{Kind: yaml.ScalarNode, Tag: "!!str", Value: value},
 	)
+}
+
+// ServerEnvPrefix is the namespace for environment overrides of server
+// config values. Env key = ServerEnvPrefix + upper-snake(flag name).
+// Example: "-no-mdns" -> SENDSPIN_SERVER_NO_MDNS.
+const ServerEnvPrefix = "SENDSPIN_SERVER_"
+
+// ServerConfigFile mirrors the server's CLI flags. Fields with "zero" values
+// that could reasonably be meaningful (bool) are pointers so absence in
+// the YAML can be distinguished from an explicit false.
+type ServerConfigFile struct {
+	Name            string `yaml:"name,omitempty"`
+	Port            *int   `yaml:"port,omitempty"`
+	LogFile         string `yaml:"log_file,omitempty"`
+	Debug           *bool  `yaml:"debug,omitempty"`
+	NoMDNS          *bool  `yaml:"no_mdns,omitempty"`
+	NoTUI           *bool  `yaml:"no_tui,omitempty"`
+	Audio           string `yaml:"audio,omitempty"`
+	DiscoverClients *bool  `yaml:"discover_clients,omitempty"`
+	Daemon          *bool  `yaml:"daemon,omitempty"`
+}
+
+// LoadServerConfig searches for a server.yaml and returns its parsed contents
+// along with the path that was loaded (empty if none was found).
+//
+// Search order (first existing wins):
+//  1. explicitPath if non-empty
+//  2. $SENDSPIN_SERVER_CONFIG if set
+//  3. $XDG_CONFIG_HOME or OS equivalent + /sendspin/server.yaml
+//  4. /etc/sendspin/server.yaml
+//
+// A missing file is not an error; the caller gets (nil, "", nil).
+func LoadServerConfig(explicitPath string) (*ServerConfigFile, string, error) {
+	var cfg ServerConfigFile
+	used, err := loadYAMLConfig(serverConfigSearchPaths(explicitPath), &cfg)
+	if err != nil {
+		return nil, used, err
+	}
+	if used == "" {
+		return nil, "", nil
+	}
+	return &cfg, used, nil
+}
+
+// DefaultServerConfigPath returns the canonical user-level server.yaml path
+// for this OS.
+func DefaultServerConfigPath() (string, error) {
+	return userConfigPath("server.yaml")
+}
+
+func serverConfigSearchPaths(explicit string) []string {
+	paths := make([]string, 0, 4)
+	if explicit != "" {
+		paths = append(paths, explicit)
+	}
+	if env := os.Getenv("SENDSPIN_SERVER_CONFIG"); env != "" {
+		paths = append(paths, env)
+	}
+	if p, err := userConfigPath("server.yaml"); err == nil {
+		paths = append(paths, p)
+	}
+	paths = append(paths, "/etc/sendspin/server.yaml")
+	return paths
+}
+
+// AsStringMap returns only the keys the user actually set in the YAML, as
+// strings suitable for flag.Set. Absent keys are omitted so the overlay
+// correctly falls through to the flag default.
+func (c *ServerConfigFile) AsStringMap() map[string]string {
+	m := make(map[string]string)
+	if c == nil {
+		return m
+	}
+	if c.Name != "" {
+		m["name"] = c.Name
+	}
+	if c.Port != nil {
+		m["port"] = strconv.Itoa(*c.Port)
+	}
+	if c.LogFile != "" {
+		m["log_file"] = c.LogFile
+	}
+	if c.Debug != nil {
+		m["debug"] = strconv.FormatBool(*c.Debug)
+	}
+	if c.NoMDNS != nil {
+		m["no_mdns"] = strconv.FormatBool(*c.NoMDNS)
+	}
+	if c.NoTUI != nil {
+		m["no_tui"] = strconv.FormatBool(*c.NoTUI)
+	}
+	if c.Audio != "" {
+		m["audio"] = c.Audio
+	}
+	if c.DiscoverClients != nil {
+		m["discover_clients"] = strconv.FormatBool(*c.DiscoverClients)
+	}
+	if c.Daemon != nil {
+		m["daemon"] = strconv.FormatBool(*c.Daemon)
+	}
+	return m
 }
 
 // atomicWriteFile writes data to path via tempfile + rename. Matches the

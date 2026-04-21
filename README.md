@@ -230,6 +230,8 @@ Run without TUI (streaming logs to stdout):
 - `--debug` - Enable debug logging
 - `--no-mdns` - Disable mDNS advertisement (clients must connect manually)
 - `--no-tui` - Disable TUI, use streaming logs instead
+- `--daemon` - Daemon mode: log to stdout only (journalctl-friendly), no TUI, no log file. Recommended under systemd.
+- `--config` - Path to `server.yaml` config file. Default search: `$SENDSPIN_SERVER_CONFIG`, `~/.config/sendspin/server.yaml`, `/etc/sendspin/server.yaml`.
 
 #### Server TUI
 
@@ -240,6 +242,39 @@ The server TUI shows:
 - Currently playing audio
 - Connected clients with codec and state
 - Press `q` or `Ctrl+C` to quit
+
+#### Configuration File (`server.yaml`)
+
+Every CLI flag has a matching key in `server.yaml`. Keys use `snake_case` (`--no-mdns` ↔ `no_mdns`).
+
+A fully-commented starter file lives at [`dist/config/server.example.yaml`](dist/config/server.example.yaml) — copy it to `~/.config/sendspin/server.yaml` (user install) or `/etc/sendspin/server.yaml` (daemon) and uncomment the keys you want to set.
+
+**Search order** (first existing file wins; missing is not an error):
+
+1. `--config <path>` flag
+2. `$SENDSPIN_SERVER_CONFIG`
+3. `~/.config/sendspin/server.yaml` (macOS: `~/Library/Application Support/sendspin/server.yaml`; Windows: `%AppData%\sendspin\server.yaml`)
+4. `/etc/sendspin/server.yaml` (daemon/system-wide)
+
+**Value precedence**, for every flag: CLI > `SENDSPIN_SERVER_<UPPER_SNAKE>` env > `server.yaml` > built-in default.
+
+#### Running under systemd
+
+`make install-daemon` installs both `sendspin-player` and `sendspin-server` as systemd units. To install only one side:
+
+```bash
+sudo make install-server-daemon   # server only
+sudo make install-player-daemon   # player only
+```
+
+Then enable and start the server:
+
+```bash
+sudo systemctl enable --now sendspin-server
+journalctl -u sendspin-server -f
+```
+
+Configure via `/etc/sendspin/server.yaml` (preferred) or `SENDSPIN_SERVER_OPTS` in `/etc/default/sendspin-server`.
 
 ### Player
 

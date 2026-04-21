@@ -1,0 +1,25 @@
+[Unit]
+Description=Sendspin Server
+Documentation=https://github.com/Sendspin/sendspin-go
+After=network-online.target sound.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+ExecStart=/usr/local/bin/sendspin-server --daemon
+Restart=on-failure
+RestartSec=5
+EnvironmentFile=-/etc/default/sendspin-server
+# Pass CLI flags via SENDSPIN_SERVER_OPTS in the environment file.
+# ExecStart is overridden below to append them.
+ExecStart=
+ExecStart=/usr/local/bin/sendspin-server --daemon $SENDSPIN_SERVER_OPTS
+
+# Hardening
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=read-only
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target
