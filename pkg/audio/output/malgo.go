@@ -337,11 +337,12 @@ func (m *Malgo) Open(sampleRate, channels, bitDepth int) error {
 }
 
 // Write queues audio samples for playback.
-// Blocks briefly if the ring buffer is full, waiting for the audio callback
-// to drain space. If insufficient space is available within the timeout,
-// the entire buffer is dropped — partial writes split a buffer mid-stream
-// and produce an audible click at the cut, while a whole-buffer drop yields
-// a brief, clean silence the audio callback fills with zeros.
+// Writes in passes if the ring is too small to absorb the whole buffer
+// at once, waiting for the audio callback to drain space between passes.
+// Buffers larger than the ring (e.g. Music Assistant's ~85 ms PCM chunks
+// against a 80 ms ring) succeed as long as the callback keeps draining.
+// Returns an error only if no drain progress occurs for maxStallTime,
+// which indicates the audio callback itself has stalled.
 func (m *Malgo) Write(samples []int32) error {
 	if !m.ready {
 		return fmt.Errorf("output not initialized")
@@ -349,35 +350,33 @@ func (m *Malgo) Write(samples []int32) error {
 
 	const (
 		retryInterval = 1 * time.Millisecond
-		maxWait       = 50 * time.Millisecond
+		maxStallTime  = 50 * time.Millisecond
 	)
 
 	volumedSamples := applyVolume(samples, m.volume, m.muted)
 
-	if len(volumedSamples) > m.ringBuffer.size {
-		// The buffer is larger than the ring can ever hold. Surfacing
-		// this loudly is more useful than silently truncating — it
-		// indicates upstream produced an oversized buffer (e.g. a
-		// decoder concatenated multiple frames).
-		return fmt.Errorf("buffer of %d samples exceeds ring capacity %d (likely upstream framing bug)",
-			len(volumedSamples), m.ringBuffer.size)
-	}
+	written := 0
+	lastProgress := time.Now()
+	for written < len(volumedSamples) {
+		n := m.ringBuffer.Write(volumedSamples[written:])
+		if n > 0 {
+			written += n
+			lastProgress = time.Now()
+			continue
+		}
 
-	// Wait for enough free space to fit the entire buffer atomically.
-	// Free() is a lower bound on actual free space at Write time (the
-	// audio callback only ever drains, never fills), so once Free()
-	// reports enough, the subsequent Write call is guaranteed to fit.
-	waited := time.Duration(0)
-	for m.ringBuffer.Free() < len(volumedSamples) {
-		if waited >= maxWait {
-			return fmt.Errorf("ring buffer full, dropped %d samples after %v",
-				len(volumedSamples), maxWait)
+		// Ring is full this pass. Wait for the audio callback to
+		// drain. If we go too long with zero progress, the callback
+		// has likely stalled — drop the remainder rather than block
+		// the producer indefinitely.
+		if time.Since(lastProgress) > maxStallTime {
+			dropped := len(volumedSamples) - written
+			return fmt.Errorf("ring buffer stalled, dropped %d of %d samples after %v with no drain progress",
+				dropped, len(volumedSamples), maxStallTime)
 		}
 		time.Sleep(retryInterval)
-		waited += retryInterval
 	}
 
-	m.ringBuffer.Write(volumedSamples)
 	return nil
 }
 
