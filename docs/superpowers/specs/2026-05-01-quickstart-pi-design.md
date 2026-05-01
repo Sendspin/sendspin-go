@@ -11,7 +11,7 @@ A `curl | sudo bash` quickstart that takes a fresh 64-bit Raspberry Pi OS instal
 
 ## Goals
 
-1. Single-command install: `curl -fsSL https://raw.githubusercontent.com/Sendspin/sendspin-go/main/scripts/quickstart-pi.sh | sudo bash` brings up the player on a fresh 64-bit Raspberry Pi OS (Bookworm or newer; required for the `libflac12` runtime package).
+1. Single-command install: `curl -fsSL https://raw.githubusercontent.com/Sendspin/sendspin-go/main/scripts/quickstart-pi.sh | sudo bash` brings up the player on a fresh 64-bit Raspberry Pi OS — Lite is the recommended target (headless, no PulseAudio/PipeWire, lower scheduling jitter), full desktop also works. Bookworm or newer is required for the `libflac12` runtime package.
 2. Idempotent re-run: invoking the script a second time upgrades the binary and refreshes the unit file in place.
 3. Optional one-shot configuration via flags: `bash -s -- --name living-room --device "USB DAC"`.
 4. Clean uninstall via `--uninstall`.
@@ -60,7 +60,7 @@ The script executes the following stages in order. Any non-zero exit aborts the 
    - `systemctl daemon-reload`.
    - Print note: "Config preserved at `/etc/sendspin/` and `/etc/default/sendspin-player`. Remove manually for a full purge."
    - Exit 0.
-4. **Install runtime deps.** `apt-get update && apt-get install -y libopus0 libopusfile0 libflac12 ca-certificates curl tar`.
+4. **Install runtime deps.** `apt-get update && apt-get install -y libopus0 libopusfile0 libflac12 libasound2 ca-certificates curl tar`. `libasound2` is the ALSA userspace library miniaudio links against; it is usually present on Pi OS Lite but not guaranteed on a truly minimal image, so we install it explicitly.
 5. **Resolve version.** Default URL: `https://github.com/Sendspin/sendspin-go/releases/latest/download/sendspin-player-linux-arm64.tar.gz`. With `--version`: `https://github.com/Sendspin/sendspin-go/releases/download/<tag>/sendspin-player-linux-arm64.tar.gz`. Same logic produces the `dist/...` raw URL ref: `main` for default, `<tag>` for pinned.
 6. **Stop service if running.** `systemctl is-active --quiet sendspin-player && systemctl stop sendspin-player`.
 7. **Download + extract.** `curl -fSL <url> -o $TMP/sp.tar.gz`, `tar -xzf $TMP/sp.tar.gz -C $TMP`, `install -m 755 $TMP/sendspin-player /usr/local/bin/sendspin-player`. `$TMP` is `mktemp -d` and removed via `EXIT` trap.
