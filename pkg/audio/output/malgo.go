@@ -338,7 +338,10 @@ func (m *Malgo) Open(sampleRate, channels, bitDepth int) error {
 
 // Write queues audio samples for playback.
 // Blocks briefly if the ring buffer is full, waiting for the audio callback
-// to drain space. Returns an error if samples are dropped after the timeout.
+// to drain space. If insufficient space is available within the timeout,
+// the entire buffer is dropped — partial writes split a buffer mid-stream
+// and produce an audible click at the cut, while a whole-buffer drop yields
+// a brief, clean silence the audio callback fills with zeros.
 func (m *Malgo) Write(samples []int32) error {
 	if !m.ready {
 		return fmt.Errorf("output not initialized")
@@ -351,22 +354,30 @@ func (m *Malgo) Write(samples []int32) error {
 
 	volumedSamples := applyVolume(samples, m.volume, m.muted)
 
-	written := 0
-	waited := time.Duration(0)
-	for written < len(volumedSamples) {
-		n := m.ringBuffer.Write(volumedSamples[written:])
-		written += n
-
-		if written < len(volumedSamples) {
-			if waited >= maxWait {
-				dropped := len(volumedSamples) - written
-				return fmt.Errorf("ring buffer full, dropped %d samples after %v", dropped, maxWait)
-			}
-			time.Sleep(retryInterval)
-			waited += retryInterval
-		}
+	if len(volumedSamples) > m.ringBuffer.size {
+		// The buffer is larger than the ring can ever hold. Surfacing
+		// this loudly is more useful than silently truncating — it
+		// indicates upstream produced an oversized buffer (e.g. a
+		// decoder concatenated multiple frames).
+		return fmt.Errorf("buffer of %d samples exceeds ring capacity %d (likely upstream framing bug)",
+			len(volumedSamples), m.ringBuffer.size)
 	}
 
+	// Wait for enough free space to fit the entire buffer atomically.
+	// Free() is a lower bound on actual free space at Write time (the
+	// audio callback only ever drains, never fills), so once Free()
+	// reports enough, the subsequent Write call is guaranteed to fit.
+	waited := time.Duration(0)
+	for m.ringBuffer.Free() < len(volumedSamples) {
+		if waited >= maxWait {
+			return fmt.Errorf("ring buffer full, dropped %d samples after %v",
+				len(volumedSamples), maxWait)
+		}
+		time.Sleep(retryInterval)
+		waited += retryInterval
+	}
+
+	m.ringBuffer.Write(volumedSamples)
 	return nil
 }
 

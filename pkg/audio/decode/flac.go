@@ -139,26 +139,30 @@ func (d *FLACDecoder) Decode(data []byte) ([]int32, error) {
 		return nil, fmt.Errorf("write to FLAC pipe: %w", err)
 	}
 
-	// Collect any decoded samples that are ready.
-	var allSamples []int32
-	for {
-		select {
-		case samples, ok := <-d.sampleCh:
-			if !ok {
-				if len(allSamples) > 0 {
-					return allSamples, nil
-				}
-				return nil, io.EOF
-			}
-			allSamples = append(allSamples, samples...)
-		default:
-			// No more samples ready right now.
-			if len(allSamples) > 0 {
-				return allSamples, nil
-			}
-			// Frame may span multiple chunks — return empty (not error).
-			return nil, nil
+	// Return at most one frame per call. The server guarantees 1 chunk
+	// = 1 FLAC frame (encoder block size matches ChunkDurationMs), so
+	// each Decode call should yield exactly one frame's samples.
+	//
+	// Draining all queued frames into one return value would tag every
+	// frame with the current chunk's timestamp — collapsing per-frame
+	// timing into a single PlayAt, which both breaks multi-room sync
+	// and hands the playback ring buffer multiples of its capacity in
+	// one Write (see issue: "ring buffer full, dropped N samples").
+	//
+	// If the parsing goroutine has raced ahead and queued more than
+	// one frame, the extras stay buffered on sampleCh and surface on
+	// subsequent Decode calls (one per call). The frame may also span
+	// multiple chunks; in that case the goroutine has not produced
+	// anything yet and we return (nil, nil) — the receiver skips the
+	// chunk and the frame surfaces on a later Decode.
+	select {
+	case samples, ok := <-d.sampleCh:
+		if !ok {
+			return nil, io.EOF
 		}
+		return samples, nil
+	default:
+		return nil, nil
 	}
 }
 
