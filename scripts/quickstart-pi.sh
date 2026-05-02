@@ -5,6 +5,14 @@
 
 set -euo pipefail
 
+on_exit() {
+    local rc=$?
+    if [[ "${rc}" -ne 0 ]]; then
+        printf '\nIf install failed mid-way, re-running the script is safe — it is idempotent.\n' >&2
+    fi
+}
+trap on_exit EXIT
+
 readonly REPO_OWNER="Sendspin"
 readonly REPO_NAME="sendspin-go"
 readonly REPO_URL="https://github.com/${REPO_OWNER}/${REPO_NAME}"
@@ -170,7 +178,7 @@ install_binary() {
 
     tmpdir="$(mktemp -d)"
     # shellcheck disable=SC2064
-    trap "rm -rf '${tmpdir}'" EXIT
+    trap "rm -rf '${tmpdir}'; on_exit" EXIT
 
     log "Downloading ${tarball_url}..."
     curl -fSL "${tarball_url}" -o "${tmpdir}/${tarball_name}" \
@@ -246,7 +254,27 @@ install_config() {
         || die "Failed to download config from ${config_url}"
     chmod 644 "${CONFIG_PATH}"
 }
-start_and_verify() { :; }
+start_and_verify() {
+    log "Reloading systemd and starting service..."
+    systemctl daemon-reload
+    systemctl enable --now "${BINARY_NAME}.service"
+
+    sleep 2
+
+    if ! systemctl is-active --quiet "${BINARY_NAME}.service"; then
+        warn "Service failed to come up. Recent logs:"
+        journalctl -u "${BINARY_NAME}.service" --no-pager -n 20 || true
+        die "${BINARY_NAME} service is not active. See logs above."
+    fi
+
+    log ""
+    log "sendspin-player ${RESOLVED_TAG} installed and running."
+    log "  Binary:   ${INSTALL_PATH}"
+    log "  Config:   ${CONFIG_PATH}"
+    log "  Env:      ${ENV_PATH}"
+    log "  Logs:     journalctl -u ${BINARY_NAME} -f"
+    log "  Devices:  ${BINARY_NAME} --list-audio-devices"
+}
 
 main() {
     parse_args "$@"
