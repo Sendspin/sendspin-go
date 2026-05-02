@@ -50,7 +50,40 @@ log()  { printf '==> %s\n' "$*"; }
 warn() { printf 'WARN: %s\n' "$*" >&2; }
 die()  { printf 'ERROR: %s\n' "$*" >&2; exit 1; }
 
-parse_args()       { :; }
+parse_args() {
+    while [[ $# -gt 0 ]]; do
+        case "$1" in
+            --name)
+                [[ $# -ge 2 ]] || die "--name requires a value"
+                ARG_NAME="$2"
+                shift 2
+                ;;
+            --device)
+                [[ $# -ge 2 ]] || die "--device requires a value"
+                ARG_DEVICE="$2"
+                shift 2
+                ;;
+            --version)
+                [[ $# -ge 2 ]] || die "--version requires a value (e.g. v1.6.2)"
+                ARG_VERSION="$2"
+                shift 2
+                ;;
+            --uninstall)
+                ARG_UNINSTALL=1
+                shift
+                ;;
+            -h|--help)
+                usage
+                exit 0
+                ;;
+            *)
+                printf 'Unknown argument: %s\n\n' "$1" >&2
+                usage >&2
+                exit 2
+                ;;
+        esac
+    done
+}
 preflight()        { :; }
 do_uninstall()     { :; }
 install_apt_deps() { :; }
