@@ -233,7 +233,19 @@ EOF
         chmod 644 "${ENV_PATH}"
     fi
 }
-install_config()   { :; }
+install_config() {
+    if [[ -f "${CONFIG_PATH}" ]]; then
+        log "Preserving existing ${CONFIG_PATH}"
+        return
+    fi
+    local config_url
+    config_url="${RAW_URL_BASE}/${RESOLVED_REF}/dist/config/player.example.yaml"
+    log "Installing example config ${CONFIG_PATH}..."
+    install -d -m 755 "${CONFIG_DIR}"
+    curl -fSL "${config_url}" -o "${CONFIG_PATH}" \
+        || die "Failed to download config from ${config_url}"
+    chmod 644 "${CONFIG_PATH}"
+}
 start_and_verify() { :; }
 
 main() {
