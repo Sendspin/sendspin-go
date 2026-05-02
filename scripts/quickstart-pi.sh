@@ -163,7 +163,29 @@ stop_service() {
         systemctl stop "${BINARY_NAME}.service"
     fi
 }
-install_binary()   { :; }
+install_binary() {
+    local tarball_url tarball_name tmpdir
+    tarball_name="${BINARY_NAME}-linux-arm64.tar.gz"
+    tarball_url="${REPO_URL}/releases/download/${RESOLVED_TAG}/${tarball_name}"
+
+    tmpdir="$(mktemp -d)"
+    # shellcheck disable=SC2064
+    trap "rm -rf '${tmpdir}'" EXIT
+
+    log "Downloading ${tarball_url}..."
+    curl -fSL "${tarball_url}" -o "${tmpdir}/${tarball_name}" \
+        || die "Failed to download release tarball from ${tarball_url}"
+
+    log "Extracting..."
+    tar -xzf "${tmpdir}/${tarball_name}" -C "${tmpdir}"
+
+    if [[ ! -f "${tmpdir}/${BINARY_NAME}" ]]; then
+        die "Tarball did not contain expected binary '${BINARY_NAME}'"
+    fi
+
+    log "Installing ${INSTALL_PATH}..."
+    install -m 755 "${tmpdir}/${BINARY_NAME}" "${INSTALL_PATH}"
+}
 install_unit()     { :; }
 install_env()      { :; }
 install_config()   { :; }
