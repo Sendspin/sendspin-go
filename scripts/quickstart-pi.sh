@@ -157,7 +157,12 @@ resolve_version() {
         log "Installing latest release: ${RESOLVED_TAG}"
     fi
 }
-stop_service()     { :; }
+stop_service() {
+    if systemctl is-active --quiet "${BINARY_NAME}.service"; then
+        log "Stopping running ${BINARY_NAME} service..."
+        systemctl stop "${BINARY_NAME}.service"
+    fi
+}
 install_binary()   { :; }
 install_unit()     { :; }
 install_env()      { :; }
