@@ -194,7 +194,45 @@ install_unit() {
         || die "Failed to download unit file from ${unit_url}"
     chmod 644 "${UNIT_PATH}"
 }
-install_env()      { :; }
+# shell_quote: wrap a string in single quotes, escaping any embedded single
+# quotes via the standard '\'' pattern. Safe for arbitrary user input.
+shell_quote() {
+    local s="$1"
+    s="${s//\'/\'\\\'\'}"
+    printf "'%s'" "${s}"
+}
+
+install_env() {
+    if [[ -n "${ARG_NAME}" || -n "${ARG_DEVICE}" ]]; then
+        log "Writing ${ENV_PATH} with --name/--device from flags..."
+        local opts=""
+        if [[ -n "${ARG_NAME}" ]]; then
+            opts+="--name $(shell_quote "${ARG_NAME}") "
+        fi
+        if [[ -n "${ARG_DEVICE}" ]]; then
+            opts+="--audio-device $(shell_quote "${ARG_DEVICE}") "
+        fi
+        # Trim trailing space.
+        opts="${opts% }"
+        cat >"${ENV_PATH}" <<EOF
+# /etc/default/sendspin-player
+# Written by quickstart-pi.sh. Edit freely; re-running quickstart with
+# --name/--device will overwrite this file.
+SENDSPIN_PLAYER_OPTS="${opts}"
+EOF
+        chmod 644 "${ENV_PATH}"
+        return
+    fi
+
+    if [[ ! -f "${ENV_PATH}" ]]; then
+        local env_url
+        env_url="${RAW_URL_BASE}/${RESOLVED_REF}/dist/systemd/${BINARY_NAME}.env"
+        log "Installing example env file ${ENV_PATH}..."
+        curl -fSL "${env_url}" -o "${ENV_PATH}" \
+            || die "Failed to download env file from ${env_url}"
+        chmod 644 "${ENV_PATH}"
+    fi
+}
 install_config()   { :; }
 start_and_verify() { :; }
 
