@@ -186,7 +186,14 @@ install_binary() {
     log "Installing ${INSTALL_PATH}..."
     install -m 755 "${tmpdir}/${BINARY_NAME}" "${INSTALL_PATH}"
 }
-install_unit()     { :; }
+install_unit() {
+    local unit_url
+    unit_url="${RAW_URL_BASE}/${RESOLVED_REF}/dist/systemd/${BINARY_NAME}.service"
+    log "Installing systemd unit ${UNIT_PATH}..."
+    curl -fSL "${unit_url}" -o "${UNIT_PATH}" \
+        || die "Failed to download unit file from ${unit_url}"
+    chmod 644 "${UNIT_PATH}"
+}
 install_env()      { :; }
 install_config()   { :; }
 start_and_verify() { :; }
