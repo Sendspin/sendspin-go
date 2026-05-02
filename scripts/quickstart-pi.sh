@@ -171,8 +171,9 @@ stop_service() {
     fi
 }
 install_binary() {
-    local tarball_url tarball_name tmpdir
-    tarball_name="${BINARY_NAME}-linux-arm64.tar.gz"
+    local tarball_url tarball_name binary_in_tarball tmpdir
+    binary_in_tarball="${BINARY_NAME}-linux-arm64"
+    tarball_name="${binary_in_tarball}.tar.gz"
     tarball_url="${REPO_URL}/releases/download/${RESOLVED_TAG}/${tarball_name}"
 
     tmpdir="$(mktemp -d)"
@@ -186,12 +187,12 @@ install_binary() {
     log "Extracting..."
     tar -xzf "${tmpdir}/${tarball_name}" -C "${tmpdir}"
 
-    if [[ ! -f "${tmpdir}/${BINARY_NAME}" ]]; then
-        die "Tarball did not contain expected binary '${BINARY_NAME}'"
+    if [[ ! -f "${tmpdir}/${binary_in_tarball}" ]]; then
+        die "Tarball did not contain expected binary '${binary_in_tarball}'"
     fi
 
     log "Installing ${INSTALL_PATH}..."
-    install -m 755 "${tmpdir}/${BINARY_NAME}" "${INSTALL_PATH}"
+    install -m 755 "${tmpdir}/${binary_in_tarball}" "${INSTALL_PATH}"
 }
 install_unit() {
     local unit_url
