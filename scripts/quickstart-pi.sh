@@ -1,0 +1,82 @@
+#!/usr/bin/env bash
+# ABOUTME: One-shot installer for sendspin-player on 64-bit Raspberry Pi OS.
+# ABOUTME: Fetches the latest arm64 release tarball, installs systemd unit, starts daemon.
+# shellcheck disable=SC2034 # Stub variables are set by functions and used in downstream phases.
+
+set -euo pipefail
+
+readonly REPO_OWNER="Sendspin"
+readonly REPO_NAME="sendspin-go"
+readonly REPO_URL="https://github.com/${REPO_OWNER}/${REPO_NAME}"
+readonly RAW_URL_BASE="https://raw.githubusercontent.com/${REPO_OWNER}/${REPO_NAME}"
+readonly BINARY_NAME="sendspin-player"
+readonly INSTALL_PATH="/usr/local/bin/${BINARY_NAME}"
+readonly UNIT_PATH="/etc/systemd/system/${BINARY_NAME}.service"
+readonly ENV_PATH="/etc/default/${BINARY_NAME}"
+readonly CONFIG_DIR="/etc/sendspin"
+readonly CONFIG_PATH="${CONFIG_DIR}/player.yaml"
+
+# Set by parse_args
+ARG_NAME=""
+ARG_DEVICE=""
+ARG_VERSION=""
+ARG_UNINSTALL=0
+
+# Resolved by resolve_version
+RESOLVED_TAG=""
+RESOLVED_REF=""
+
+usage() {
+    cat <<EOF
+Usage: quickstart-pi.sh [--name <s>] [--device <s>] [--version <tag>] [--uninstall]
+
+Installs sendspin-player as a systemd daemon on 64-bit Raspberry Pi OS.
+
+Options:
+  --name <s>       Friendly player name (default: <hostname>-sendspin-player).
+  --device <s>     Exact audio device name. Run 'sendspin-player --list-audio-devices' after
+                   install to discover available names.
+  --version <tag>  Pin to a specific release tag (e.g. v1.6.2). Default: latest.
+  --uninstall      Stop the service and remove the binary and unit file. Config is preserved.
+  -h, --help       Show this help.
+
+Run with sudo:
+  curl -fsSL ${RAW_URL_BASE}/main/scripts/quickstart-pi.sh | sudo bash
+  curl -fsSL ${RAW_URL_BASE}/main/scripts/quickstart-pi.sh | sudo bash -s -- --name "Living Room"
+EOF
+}
+
+log()  { printf '==> %s\n' "$*"; }
+warn() { printf 'WARN: %s\n' "$*" >&2; }
+die()  { printf 'ERROR: %s\n' "$*" >&2; exit 1; }
+
+parse_args()       { :; }
+preflight()        { :; }
+do_uninstall()     { :; }
+install_apt_deps() { :; }
+resolve_version()  { :; }
+stop_service()     { :; }
+install_binary()   { :; }
+install_unit()     { :; }
+install_env()      { :; }
+install_config()   { :; }
+start_and_verify() { :; }
+
+main() {
+    parse_args "$@"
+    preflight
+    if [[ "${ARG_UNINSTALL}" -eq 1 ]]; then
+        do_uninstall
+        exit 0
+    fi
+    install_apt_deps
+    resolve_version
+    stop_service
+    install_binary
+    install_unit
+    install_env
+    install_config
+    start_and_verify
+}
+
+main "$@"
