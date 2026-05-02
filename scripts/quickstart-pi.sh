@@ -110,7 +110,22 @@ Raspberry Pi OS Lite). For other distros see the README install steps:
 systemd service; non-systemd hosts must follow the manual install steps."
     fi
 }
-do_uninstall()     { :; }
+do_uninstall() {
+    log "Uninstalling sendspin-player..."
+
+    if systemctl list-unit-files "${BINARY_NAME}.service" >/dev/null 2>&1; then
+        systemctl disable --now "${BINARY_NAME}.service" 2>/dev/null || true
+    fi
+
+    rm -f "${INSTALL_PATH}"
+    rm -f "${UNIT_PATH}"
+    systemctl daemon-reload
+
+    log "Uninstall complete."
+    log "Config preserved at ${CONFIG_DIR}/ and ${ENV_PATH}."
+    log "Remove manually for a full purge:"
+    log "  sudo rm -rf ${CONFIG_DIR} ${ENV_PATH}"
+}
 install_apt_deps() { :; }
 resolve_version()  { :; }
 stop_service()     { :; }
