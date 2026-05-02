@@ -126,7 +126,18 @@ do_uninstall() {
     log "Remove manually for a full purge:"
     log "  sudo rm -rf ${CONFIG_DIR} ${ENV_PATH}"
 }
-install_apt_deps() { :; }
+install_apt_deps() {
+    log "Installing runtime dependencies..."
+    DEBIAN_FRONTEND=noninteractive apt-get update -qq
+    DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
+        libopus0 \
+        libopusfile0 \
+        libflac12 \
+        libasound2 \
+        ca-certificates \
+        curl \
+        tar
+}
 resolve_version()  { :; }
 stop_service()     { :; }
 install_binary()   { :; }
