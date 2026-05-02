@@ -1,7 +1,6 @@
 #!/usr/bin/env bash
 # ABOUTME: One-shot installer for sendspin-player on 64-bit Raspberry Pi OS.
 # ABOUTME: Fetches the latest arm64 release tarball, installs systemd unit, starts daemon.
-# shellcheck disable=SC2034 # Stub variables are set by functions and used in downstream phases.
 
 set -euo pipefail
 
