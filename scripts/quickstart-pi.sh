@@ -84,7 +84,32 @@ parse_args() {
         esac
     done
 }
-preflight()        { :; }
+preflight() {
+    if [[ "${EUID}" -ne 0 ]]; then
+        die "Root required. Re-run with sudo:
+  curl -fsSL ${RAW_URL_BASE}/main/scripts/quickstart-pi.sh | sudo bash"
+    fi
+
+    local arch
+    arch="$(uname -m)"
+    if [[ "${arch}" != "aarch64" ]]; then
+        die "Unsupported architecture: ${arch}. This script supports 64-bit
+Raspberry Pi OS only (aarch64). For Pi 3 / 4 / 5 / Zero 2 W, install
+the 64-bit Pi OS image: https://www.raspberrypi.com/software/operating-systems/
+Pi 1 / Zero (v1) / Zero W are not supported (32-bit ARMv6 only)."
+    fi
+
+    if [[ ! -f /etc/debian_version ]]; then
+        die "Unsupported OS. This script targets Debian-based distros (Pi OS,
+Raspberry Pi OS Lite). For other distros see the README install steps:
+  ${REPO_URL}#installation"
+    fi
+
+    if ! command -v systemctl >/dev/null 2>&1; then
+        die "systemctl not found. The quickstart installs sendspin-player as a
+systemd service; non-systemd hosts must follow the manual install steps."
+    fi
+}
 do_uninstall()     { :; }
 install_apt_deps() { :; }
 resolve_version()  { :; }
