@@ -138,7 +138,25 @@ install_apt_deps() {
         curl \
         tar
 }
-resolve_version()  { :; }
+resolve_version() {
+    if [[ -n "${ARG_VERSION}" ]]; then
+        RESOLVED_TAG="${ARG_VERSION}"
+        RESOLVED_REF="${ARG_VERSION}"
+        log "Installing pinned version: ${RESOLVED_TAG}"
+    else
+        # Use GitHub's latest-release redirect: no API call, no JSON parsing.
+        # The redirect target tells us the resolved tag.
+        local redirect_url
+        redirect_url="$(curl -fsSLI -o /dev/null -w '%{url_effective}' \
+            "${REPO_URL}/releases/latest")" \
+            || die "Failed to resolve latest release tag from ${REPO_URL}/releases/latest"
+        RESOLVED_TAG="${redirect_url##*/}"
+        # The dist/ files at "main" are forward-compatible enough for the
+        # latest-tagged release; pin them to the same tag for consistency.
+        RESOLVED_REF="${RESOLVED_TAG}"
+        log "Installing latest release: ${RESOLVED_TAG}"
+    fi
+}
 stop_service()     { :; }
 install_binary()   { :; }
 install_unit()     { :; }
