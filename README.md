@@ -131,6 +131,29 @@ Full API documentation: https://pkg.go.dev/github.com/Sendspin/sendspin-go
 - Interactive terminal UI with volume control
 - Jitter buffer for smooth playback
 
+## Quickstart on Raspberry Pi
+
+For a 64-bit Raspberry Pi OS (Lite is recommended; Bookworm or newer required):
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/Sendspin/sendspin-go/main/scripts/quickstart-pi.sh | sudo bash
+```
+
+The script installs runtime dependencies, downloads the latest `sendspin-player-linux-arm64` release tarball, and registers the player as a systemd service. Add flags after `--` to pre-configure the player without editing files afterwards:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/Sendspin/sendspin-go/main/scripts/quickstart-pi.sh \
+  | sudo bash -s -- --name "Living Room" --device "USB Audio Device"
+```
+
+Pin to a specific release with `--version v1.6.2`. Remove the player with `--uninstall` (config in `/etc/sendspin/` is preserved). Supported on Pi 3 / 4 / 5 / Zero 2 W; not supported on 32-bit-only hardware (Pi 1 / Zero v1 / Zero W).
+
+After install:
+
+- View live logs: `journalctl -u sendspin-player -f`
+- Discover device names: `sendspin-player --list-audio-devices`
+- Edit config: `sudo nano /etc/sendspin/player.yaml`
+
 ## Installation
 
 ### Prerequisites
