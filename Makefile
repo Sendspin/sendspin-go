@@ -11,6 +11,14 @@
 VERSION ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo "dev")
 LDFLAGS := -X github.com/Sendspin/sendspin-go/internal/version.Version=$(VERSION)
 
+# Build with -tags=nolibopusfile so gopkg.in/hraban/opus.v2 doesn't link
+# libopusfile. Our code never calls the opus.Stream API (the only consumer
+# of the opusfile parts), so the linkage was free runtime-dependency weight.
+# Override on the command line if you actually need opusfile (e.g. for
+# upstream stream_test.go): make BUILDTAGS= test
+BUILDTAGS ?= nolibopusfile
+export GOFLAGS = -tags=$(BUILDTAGS)
+
 # Default target
 all: build
 

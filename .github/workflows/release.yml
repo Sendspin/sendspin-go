@@ -10,6 +10,12 @@ on:
 permissions:
   contents: write
 
+# Drop the libopusfile parts of gopkg.in/hraban/opus.v2 so the released
+# binary doesn't link libopusfile.so.0 / opusfile.dylib at runtime. We
+# never call the opus.Stream API. See ci.yml for the same setup.
+env:
+  GOFLAGS: -tags=nolibopusfile
+
 jobs:
   test:
     name: Test Before Release
@@ -23,7 +29,7 @@ jobs:
     - name: Install dependencies
       run: |
         sudo apt-get update
-        sudo apt-get install -y libopus-dev libopusfile-dev libasound2-dev
+        sudo apt-get install -y libopus-dev libasound2-dev
 
     - name: Run tests
       run: go test -v -race ./...
@@ -72,11 +78,11 @@ jobs:
       if: matrix.os == 'linux'
       run: |
         sudo apt-get update
-        sudo apt-get install -y libopus-dev libopusfile-dev libasound2-dev
+        sudo apt-get install -y libopus-dev libasound2-dev
 
     - name: Install dependencies (macOS)
       if: matrix.os == 'darwin'
-      run: brew install opus opusfile
+      run: brew install opus
 
     - name: Install dependencies (Windows)
       if: matrix.os == 'windows'
@@ -88,7 +94,6 @@ jobs:
           mingw-w64-x86_64-gcc
           mingw-w64-x86_64-pkg-config
           mingw-w64-x86_64-opus
-          mingw-w64-x86_64-opusfile
 
     - name: Get version
       id: version
