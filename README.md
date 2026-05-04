@@ -158,17 +158,17 @@ After install:
 
 ### Prerequisites
 
-You'll need `pkg-config`, Opus libraries, and optionally `ffmpeg` for HLS streaming:
+You'll need `pkg-config`, the Opus library, and optionally `ffmpeg` for HLS streaming:
 
 ```bash
 # macOS
-brew install pkg-config opus opusfile ffmpeg
+brew install pkg-config opus ffmpeg
 
 # Ubuntu/Debian
-sudo apt-get install pkg-config libopus-dev libopusfile-dev ffmpeg
+sudo apt-get install pkg-config libopus-dev ffmpeg
 
 # Fedora
-sudo dnf install pkg-config opus-devel opusfile-devel ffmpeg
+sudo dnf install pkg-config opus-devel ffmpeg
 ```
 
 **Windows (MSYS2):**
@@ -177,7 +177,7 @@ Install MSYS2 from https://www.msys2.org/, then in a **MSYS2 MinGW 64-bit** shel
 
 ```bash
 pacman -S mingw-w64-x86_64-gcc mingw-w64-x86_64-pkg-config \
-          mingw-w64-x86_64-opus mingw-w64-x86_64-opusfile
+          mingw-w64-x86_64-opus
 ```
 
 All subsequent `go build`, `go test`, and `make` commands must be run from a shell with the MSYS2 MinGW 64-bit toolchain on PATH:
@@ -186,7 +186,10 @@ All subsequent `go build`, `go test`, and `make` commands must be run from a she
 export PATH="/c/msys64/mingw64/bin:$PATH"
 ```
 
-**Note:** `ffmpeg` is only required for HLS/m3u8 stream support. Local files and direct HTTP MP3 streams work without it.
+**Notes:**
+
+- `ffmpeg` is only required for HLS/m3u8 stream support. Local files and direct HTTP MP3 streams work without it.
+- The Makefile sets `GOFLAGS=-tags=nolibopusfile`, which skips the `opus.Stream` parts of `gopkg.in/hraban/opus.v2` and avoids linking `libopusfile`. If you build with raw `go build` instead of `make`, either install `libopusfile-dev` / `opusfile` as well, or export `GOFLAGS=-tags=nolibopusfile` in your shell.
 
 ### Build
 

@@ -11,7 +11,7 @@ This guidance is aimed at Claude Code but may also be suitable for other AI tool
 
 ## Commands
 
-Native deps: `libopus`, `libopusfile`, `libflac`. Use `./install-deps.sh` (handles brew/apt/dnf/pacman) or the per-OS commands in README.md. `ffmpeg` is only required for HLS/m3u8 server input.
+Native deps: `libopus` only. FLAC is pure-Go (`mewkiz/flac`); the Makefile, CI, and release pipelines all build with `GOFLAGS=-tags=nolibopusfile` so `gopkg.in/hraban/opus.v2`'s `opus.Stream` parts (the only consumer of `libopusfile`) are skipped and the binary doesn't link `libopusfile` at runtime. Use `./install-deps.sh` (handles brew/apt/dnf/pacman) or the per-OS commands in README.md. `ffmpeg` is only required for HLS/m3u8 server input. If you ever need to build with the opus.Stream API, override the tag: `make BUILDTAGS= test`.
 
 ```bash
 make                            # Build sendspin-player + sendspin-server

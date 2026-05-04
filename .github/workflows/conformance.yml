@@ -13,6 +13,13 @@ concurrency:
   group: conformance-${{ github.ref }}
   cancel-in-progress: true
 
+# Match ci.yml / release.yml — the conformance harness invokes `go build`
+# under the hood when it spins up the sendspin-go adapter, and we want
+# that build to skip libopusfile linking the same way the released
+# binaries do.
+env:
+  GOFLAGS: -tags=nolibopusfile
+
 jobs:
   conformance:
     name: Protocol conformance

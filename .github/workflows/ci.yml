@@ -8,6 +8,13 @@ on:
   pull_request:
     branches: [ main ]
 
+# Tell every `go` invocation across every job to drop the libopusfile parts of
+# gopkg.in/hraban/opus.v2. Our code never calls the opus.Stream API, and the
+# tag lets us skip installing libopusfile-dev / opusfile / mingw-w64-x86_64-opusfile
+# on the runners and lets the released binary not depend on libopusfile0 at runtime.
+env:
+  GOFLAGS: -tags=nolibopusfile
+
 jobs:
   test:
     name: Test
@@ -21,7 +28,7 @@ jobs:
     - name: Install dependencies
       run: |
         sudo apt-get update
-        sudo apt-get install -y libopus-dev libopusfile-dev libasound2-dev
+        sudo apt-get install -y libopus-dev libasound2-dev
 
     - name: Run tests
       run: go test -v -race -coverprofile=coverage.out -covermode=atomic ./...
@@ -44,7 +51,7 @@ jobs:
     - name: Install dependencies
       run: |
         sudo apt-get update
-        sudo apt-get install -y libopus-dev libopusfile-dev libasound2-dev shellcheck
+        sudo apt-get install -y libopus-dev libasound2-dev shellcheck
 
     - name: Shellcheck
       run: shellcheck scripts/*.sh install-deps.sh
@@ -93,12 +100,12 @@ jobs:
       if: matrix.os == 'linux'
       run: |
         sudo apt-get update
-        sudo apt-get install -y libopus-dev libopusfile-dev libasound2-dev
+        sudo apt-get install -y libopus-dev libasound2-dev
 
     # macOS dependencies
     - name: Install dependencies (macOS)
       if: matrix.os == 'darwin'
-      run: brew install opus opusfile
+      run: brew install opus
 
     # Windows dependencies via MSYS2
     - name: Install dependencies (Windows)
@@ -111,7 +118,6 @@ jobs:
           mingw-w64-x86_64-gcc
           mingw-w64-x86_64-pkg-config
           mingw-w64-x86_64-opus
-          mingw-w64-x86_64-opusfile
 
     - name: Get version
       id: version
