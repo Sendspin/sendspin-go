@@ -41,6 +41,8 @@ var (
 	configPath     = flag.String("config", "", "Path to player.yaml config file. Default search: $SENDSPIN_PLAYER_CONFIG, ~/.config/sendspin/player.yaml, /etc/sendspin/player.yaml.")
 	audioDevice    = flag.String("audio-device", "", "Playback device name (see --list-audio-devices). Empty = miniaudio default.")
 	listAudio      = flag.Bool("list-audio-devices", false, "List available playback devices and exit.")
+	maxSampleRate  = flag.Int("max-sample-rate", 0, "Cap the highest sample rate advertised to the server. 0 = auto-probe the audio device. Set explicitly when the auto-probe is wrong (e.g. Pi3 onboard headphones report 192k but can't actually drain it).")
+	maxBitDepth    = flag.Int("max-bit-depth", 0, "Cap the highest bit depth advertised to the server. 0 = auto-probe. Setting either --max-sample-rate or --max-bit-depth disables auto-probe entirely.")
 )
 
 func main() {
@@ -194,6 +196,8 @@ func main() {
 		BufferCapacity: *bufferCapacity,
 		ClientID:       resolvedClientID,
 		AudioDevice:    *audioDevice,
+		MaxSampleRate:  *maxSampleRate,
+		MaxBitDepth:    *maxBitDepth,
 		DeviceInfo: sendspin.DeviceInfo{
 			ProductName:     deviceProduct,
 			Manufacturer:    deviceManufacturer,

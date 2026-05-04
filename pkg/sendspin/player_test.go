@@ -195,3 +195,65 @@ func TestPlayer_StatusBeforeConnect(t *testing.T) {
 		t.Errorf("expected state idle, got %s", status.State)
 	}
 }
+
+// TestPlayer_EnsureCapsResolved_ExplicitOverrideSkipsProbe asserts the
+// "replace" semantics from the design discussion: if the user has set either
+// MaxSampleRate or MaxBitDepth, ensureCapsResolved must NOT overwrite the
+// other field via probe — explicit user choice wins entirely, even when
+// only one of the two fields is non-zero.
+func TestPlayer_EnsureCapsResolved_ExplicitOverrideSkipsProbe(t *testing.T) {
+	tests := []struct {
+		name      string
+		rate      int
+		depth     int
+		wantRate  int
+		wantDepth int
+	}{
+		{"both set", 48000, 16, 48000, 16},
+		{"rate only", 96000, 0, 96000, 0},
+		{"depth only", 0, 16, 0, 16},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			player, _ := NewPlayer(PlayerConfig{
+				ServerAddr:    "localhost:8927",
+				PlayerName:    "Test",
+				MaxSampleRate: tt.rate,
+				MaxBitDepth:   tt.depth,
+			})
+			player.ensureCapsResolved()
+			if player.config.MaxSampleRate != tt.wantRate {
+				t.Errorf("MaxSampleRate = %d, want %d (probe must not run)",
+					player.config.MaxSampleRate, tt.wantRate)
+			}
+			if player.config.MaxBitDepth != tt.wantDepth {
+				t.Errorf("MaxBitDepth = %d, want %d (probe must not run)",
+					player.config.MaxBitDepth, tt.wantDepth)
+			}
+		})
+	}
+}
+
+// TestPlayer_EnsureCapsResolved_RunsOnce guards reconnect behavior: the
+// caps are probed at most once. The cached flag is set even on probe-skip
+// paths so subsequent reconnects don't re-probe miniaudio either.
+func TestPlayer_EnsureCapsResolved_RunsOnce(t *testing.T) {
+	player, _ := NewPlayer(PlayerConfig{
+		ServerAddr:    "localhost:8927",
+		PlayerName:    "Test",
+		MaxSampleRate: 48000, // user-set, so no probe
+	})
+	player.ensureCapsResolved()
+	if !player.capsResolved {
+		t.Error("capsResolved should be true after first call")
+	}
+	// Mutating MaxSampleRate after first call must not be re-resolved by a
+	// second invocation — proves the early return on capsResolved fires.
+	player.config.MaxSampleRate = 99999
+	player.ensureCapsResolved()
+	if player.config.MaxSampleRate != 99999 {
+		t.Errorf("second call should be no-op; got MaxSampleRate=%d",
+			player.config.MaxSampleRate)
+	}
+}

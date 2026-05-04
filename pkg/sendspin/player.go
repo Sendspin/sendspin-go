@@ -72,6 +72,19 @@ type PlayerConfig struct {
 	// Open fails loudly if a non-empty name doesn't match an available device.
 	AudioDevice string
 
+	// MaxSampleRate caps the highest SampleRate advertised to the server.
+	// 0 = auto-probe the AudioDevice for its native ceiling on first Connect.
+	// Setting either MaxSampleRate or MaxBitDepth to a non-zero value disables
+	// auto-probe entirely (replace semantics — explicit user choice wins, even
+	// if it raises the cap above what the probe would have found). Use the
+	// override when the auto-probe is wrong, as on Pi3 where ALSA reports the
+	// bcm2835 onboard headphones accept 192k/24 but the hardware can't
+	// actually drain it.
+	MaxSampleRate int
+	// MaxBitDepth caps the highest BitDepth advertised to the server.
+	// 0 = auto-probe. See MaxSampleRate for override semantics.
+	MaxBitDepth int
+
 	DeviceInfo DeviceInfo
 
 	OnMetadata func(Metadata)
@@ -137,12 +150,13 @@ type PlayerStats struct {
 // Player provides high-level audio playback from Sendspin servers.
 // It composes a Receiver (connect/sync/decode/schedule) with an audio output backend.
 type Player struct {
-	config   PlayerConfig
-	receiver *Receiver
-	output   output.Output
-	state    PlayerState
-	ctx      context.Context
-	cancel   context.CancelFunc
+	config       PlayerConfig
+	receiver     *Receiver
+	output       output.Output
+	state        PlayerState
+	ctx          context.Context
+	cancel       context.CancelFunc
+	capsResolved bool // probe runs once at first Connect; reconnects reuse the cached caps
 }
 
 func NewPlayer(config PlayerConfig) (*Player, error) {
@@ -203,6 +217,7 @@ func (p *Player) Connect() error {
 }
 
 func (p *Player) buildReceiver(addr string) (*Receiver, error) {
+	p.ensureCapsResolved()
 	return NewReceiver(ReceiverConfig{
 		ServerAddr:     addr,
 		PlayerName:     p.config.PlayerName,
@@ -210,6 +225,8 @@ func (p *Player) buildReceiver(addr string) (*Receiver, error) {
 		StaticDelayMs:  p.config.StaticDelayMs,
 		PreferredCodec: p.config.PreferredCodec,
 		BufferCapacity: p.config.BufferCapacity,
+		MaxSampleRate:  p.config.MaxSampleRate,
+		MaxBitDepth:    p.config.MaxBitDepth,
 		ClientID:       p.config.ClientID,
 		DeviceInfo:     p.config.DeviceInfo,
 		DecoderFactory: p.config.DecoderFactory,
@@ -218,6 +235,48 @@ func (p *Player) buildReceiver(addr string) (*Receiver, error) {
 		OnStreamEnd:    p.onStreamEnd,
 		OnError:        p.config.OnError,
 	})
+}
+
+// ensureCapsResolved decides MaxSampleRate / MaxBitDepth on first call and
+// caches the decision so subsequent reconnects reuse the same caps without
+// re-probing miniaudio.
+//
+// Replace semantics: any explicit non-zero override on either field skips
+// the probe entirely, so users who want to raise the cap above the device's
+// reported ceiling can. Probe failures are logged and treated as "no cap" —
+// we'd rather advertise too much (and let the device-stall path complain)
+// than refuse to start when the malgo backend is unavailable (e.g. CI).
+//
+// When config.Output is non-nil, the caller has substituted their own output
+// (test doubles, custom backends), and probing the malgo default device
+// wouldn't tell us anything useful — skip in that case too.
+func (p *Player) ensureCapsResolved() {
+	if p.capsResolved {
+		return
+	}
+	p.capsResolved = true
+
+	if p.config.MaxSampleRate != 0 || p.config.MaxBitDepth != 0 {
+		log.Printf("Output capability cap: %d Hz / %d-bit (source: config)",
+			p.config.MaxSampleRate, p.config.MaxBitDepth)
+		return
+	}
+	if p.config.Output != nil {
+		return
+	}
+
+	rate, depth, err := output.QueryDeviceCapabilities(p.config.AudioDevice)
+	if err != nil {
+		log.Printf("Output capability probe failed (%v); advertising full format list", err)
+		return
+	}
+	if rate == 0 && depth == 0 {
+		log.Printf("Output capability probe returned no native formats; advertising full format list")
+		return
+	}
+	p.config.MaxSampleRate = rate
+	p.config.MaxBitDepth = depth
+	log.Printf("Output capability cap: %d Hz / %d-bit (source: probe)", rate, depth)
 }
 
 // runReconnectLoop supervises the active receiver and rebuilds it with

@@ -91,3 +91,25 @@
 # start and lists every available device — silent fallback would defeat the
 # point of setting this key.
 # audio_device: "USB Audio Device"
+
+# ---------------------------------------------------------------------------
+# Output capability override
+# ---------------------------------------------------------------------------
+
+# Cap the highest sample rate / bit depth advertised to the server. Both
+# default to 0, which means "auto-probe the audio device for its native
+# ceiling at startup". Setting either key disables auto-probe entirely
+# (the explicit value wins, even if it's higher than the probe would have
+# returned).
+#
+# When to set these explicitly:
+#  - Pi3 / Pi Zero with onboard headphone output: ALSA reports the bcm2835
+#    driver accepts 192k/24, but the actual hardware can't drain that fast.
+#    Cap at 48000 / 16 to match what the device can really do.
+#  - USB DAC that advertises higher rates than its analog stage handles
+#    cleanly — pin to the rate that sounds best.
+#  - Bandwidth-constrained networks where you'd rather force lossy/low-rate
+#    even though the device could play hi-res.
+#
+# max_sample_rate: 48000
+# max_bit_depth: 16
