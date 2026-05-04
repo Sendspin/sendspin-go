@@ -39,6 +39,8 @@ type PlayerConfigFile struct {
 	BufferCapacity *int   `yaml:"buffer_capacity,omitempty"`
 	ClientID       string `yaml:"client_id,omitempty"`
 	AudioDevice    string `yaml:"audio_device,omitempty"`
+	MaxSampleRate  *int   `yaml:"max_sample_rate,omitempty"`
+	MaxBitDepth    *int   `yaml:"max_bit_depth,omitempty"`
 }
 
 // loadYAMLConfig walks searchPaths, and for the first one that exists opens
@@ -206,6 +208,12 @@ func (c *PlayerConfigFile) AsStringMap() map[string]string {
 	}
 	if c.AudioDevice != "" {
 		m["audio_device"] = c.AudioDevice
+	}
+	if c.MaxSampleRate != nil {
+		m["max_sample_rate"] = strconv.Itoa(*c.MaxSampleRate)
+	}
+	if c.MaxBitDepth != nil {
+		m["max_bit_depth"] = strconv.Itoa(*c.MaxBitDepth)
 	}
 	return m
 }

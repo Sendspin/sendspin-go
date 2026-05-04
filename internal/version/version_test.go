@@ -1,5 +1,5 @@
-// ABOUTME: Tests for version constants
-// ABOUTME: Ensures version information is properly defined
+// ABOUTME: Tests for version package symbols
+// ABOUTME: Ensures version information is properly defined and ldflags-patchable
 package version
 
 import (
@@ -58,24 +58,19 @@ func TestManufacturerFormat(t *testing.T) {
 	}
 }
 
-func TestVersionImmutability(t *testing.T) {
-	// Store original values
-	originalVersion := Version
-	originalProduct := Product
-	originalManufacturer := Manufacturer
-
-	// These are const, so they can't actually be modified,
-	// but let's verify they're still accessible
-	if Version != originalVersion {
-		t.Error("Version changed unexpectedly")
+func TestVersionLdflagsPatchable(t *testing.T) {
+	// Version, Product, and Manufacturer are package-level string vars so the
+	// release workflow can patch Version via -ldflags -X. Verify the symbols
+	// are accessible; immutability is intentionally not asserted, since
+	// patchability requires var declarations.
+	if Version == "" {
+		t.Error("Version is empty")
 	}
-
-	if Product != originalProduct {
-		t.Error("Product changed unexpectedly")
+	if Product == "" {
+		t.Error("Product is empty")
 	}
-
-	if Manufacturer != originalManufacturer {
-		t.Error("Manufacturer changed unexpectedly")
+	if Manufacturer == "" {
+		t.Error("Manufacturer is empty")
 	}
 }
 

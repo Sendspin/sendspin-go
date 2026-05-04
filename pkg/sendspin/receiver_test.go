@@ -7,6 +7,7 @@ import (
 
 	"github.com/Sendspin/sendspin-go/pkg/audio"
 	"github.com/Sendspin/sendspin-go/pkg/audio/decode"
+	"github.com/Sendspin/sendspin-go/pkg/protocol"
 )
 
 func TestNewReceiver_Defaults(t *testing.T) {
@@ -168,5 +169,114 @@ func TestReceiver_CustomDecoderFactory(t *testing.T) {
 	}
 	if factoryCalled {
 		t.Error("factory should not be called before connect")
+	}
+}
+
+// maxRateAndDepth scans formats and returns the largest sample rate and bit
+// depth present. Test helper: lets assertions describe the cap by intent
+// ("nothing above 48k/16") rather than counting list entries.
+func maxRateAndDepth(formats []protocol.AudioFormat) (int, int) {
+	var maxRate, maxDepth int
+	for _, f := range formats {
+		if f.SampleRate > maxRate {
+			maxRate = f.SampleRate
+		}
+		if f.BitDepth > maxDepth {
+			maxDepth = f.BitDepth
+		}
+	}
+	return maxRate, maxDepth
+}
+
+func TestBuildSupportedFormats_NoCaps(t *testing.T) {
+	got := buildSupportedFormats("", 0, 0)
+	if len(got) == 0 {
+		t.Fatal("expected non-empty format list with no caps")
+	}
+	maxRate, maxDepth := maxRateAndDepth(got)
+	if maxRate != 192000 {
+		t.Errorf("expected max rate 192000 with no caps, got %d", maxRate)
+	}
+	if maxDepth != 24 {
+		t.Errorf("expected max depth 24 with no caps, got %d", maxDepth)
+	}
+}
+
+func TestBuildSupportedFormats_RateCap(t *testing.T) {
+	got := buildSupportedFormats("", 48000, 0)
+	if len(got) == 0 {
+		t.Fatal("expected non-empty list with 48000Hz cap")
+	}
+	for _, f := range got {
+		if f.SampleRate > 48000 {
+			t.Errorf("expected no rate > 48000, got %s @ %dHz", f.Codec, f.SampleRate)
+		}
+	}
+	// Boundary: 48000Hz formats must survive.
+	hasFortyEight := false
+	for _, f := range got {
+		if f.SampleRate == 48000 {
+			hasFortyEight = true
+			break
+		}
+	}
+	if !hasFortyEight {
+		t.Error("expected at least one 48000Hz format to survive the cap")
+	}
+}
+
+func TestBuildSupportedFormats_BitDepthCap(t *testing.T) {
+	got := buildSupportedFormats("", 0, 16)
+	if len(got) == 0 {
+		t.Fatal("expected non-empty list with 16-bit cap")
+	}
+	for _, f := range got {
+		if f.BitDepth > 16 {
+			t.Errorf("expected no depth > 16, got %s @ %d-bit", f.Codec, f.BitDepth)
+		}
+	}
+}
+
+func TestBuildSupportedFormats_BothCaps(t *testing.T) {
+	got := buildSupportedFormats("", 48000, 16)
+	if len(got) == 0 {
+		t.Fatal("expected non-empty list with 48k/16 caps")
+	}
+	for _, f := range got {
+		if f.SampleRate > 48000 || f.BitDepth > 16 {
+			t.Errorf("expected no entries beyond 48000Hz/16-bit, got %s @ %dHz/%d-bit",
+				f.Codec, f.SampleRate, f.BitDepth)
+		}
+	}
+}
+
+func TestBuildSupportedFormats_PreferredCodecAfterFilter(t *testing.T) {
+	// Filter eliminates high-res FLAC; the survivor should still be ordered
+	// with FLAC at the front when preferredCodec="flac".
+	got := buildSupportedFormats("flac", 48000, 24)
+	if len(got) == 0 {
+		t.Fatal("expected non-empty list")
+	}
+	if got[0].Codec != "flac" {
+		t.Errorf("expected preferred codec at front, got %s", got[0].Codec)
+	}
+}
+
+func TestBuildSupportedFormats_CapsAtExactBoundary(t *testing.T) {
+	// maxSampleRate=192000, maxBitDepth=24 should keep everything.
+	full := buildSupportedFormats("", 0, 0)
+	bounded := buildSupportedFormats("", 192000, 24)
+	if len(bounded) != len(full) {
+		t.Errorf("boundary cap should keep all formats: full=%d bounded=%d", len(full), len(bounded))
+	}
+}
+
+func TestBuildSupportedFormats_AggressiveCapEmpty(t *testing.T) {
+	// User asks for ≤ 8000Hz / ≤ 8-bit. Nothing in our list matches; we
+	// honestly return empty rather than fabricating a fallback. The handshake
+	// will fail, which is the right user-visible signal that the cap is wrong.
+	got := buildSupportedFormats("", 8000, 8)
+	if len(got) != 0 {
+		t.Errorf("expected empty list for impossible caps, got %d entries", len(got))
 	}
 }

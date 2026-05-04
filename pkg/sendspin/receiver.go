@@ -7,6 +7,7 @@ import (
 	"encoding/base64"
 	"fmt"
 	"log"
+	"strings"
 	"time"
 
 	"github.com/Sendspin/sendspin-go/pkg/audio"
@@ -22,6 +23,14 @@ type ReceiverConfig struct {
 	StaticDelayMs  int    // optional static latency compensation (ms) applied to every scheduled play time
 	PreferredCodec string // "pcm", "opus", or "flac" — reorders the advertised format list so the server picks this codec first
 	BufferCapacity int    // buffer_capacity in bytes advertised to the server (default: 1048576 = 1MB)
+	// MaxSampleRate caps the highest SampleRate advertised to the server.
+	// 0 = no cap. Set this when the eventual audio output device cannot
+	// sustain higher rates (e.g. Pi3 onboard bcm2835 headphones can't
+	// actually drain 192k even though ALSA reports it accepts the format).
+	MaxSampleRate int
+	// MaxBitDepth caps the highest BitDepth advertised to the server.
+	// 0 = no cap. See MaxSampleRate for the motivating case.
+	MaxBitDepth int
 	// ClientID is the already-resolved client_id to advertise in client/hello.
 	// Required — callers should compute this once at startup (typically via
 	// ResolveClientID) and thread the same value through reconnects.
@@ -145,6 +154,9 @@ func (r *Receiver) Connect() error {
 		return fmt.Errorf("ReceiverConfig.ClientID is required (resolve via sendspin.ResolveClientID)")
 	}
 
+	supportedFormats := buildSupportedFormats(r.config.PreferredCodec, r.config.MaxSampleRate, r.config.MaxBitDepth)
+	logAdvertisedFormats(supportedFormats, r.config.MaxSampleRate, r.config.MaxBitDepth)
+
 	clientConfig := protocol.Config{
 		ServerAddr: r.serverAddr,
 		ClientID:   r.config.ClientID,
@@ -156,7 +168,7 @@ func (r *Receiver) Connect() error {
 			SoftwareVersion: r.config.DeviceInfo.SoftwareVersion,
 		},
 		PlayerV1Support: protocol.PlayerV1Support{
-			SupportedFormats:  buildSupportedFormats(r.config.PreferredCodec),
+			SupportedFormats:  supportedFormats,
 			BufferCapacity:    r.config.BufferCapacity,
 			SupportedCommands: []string{"volume", "mute"},
 		},
@@ -463,10 +475,17 @@ func (r *Receiver) clockSyncLoop() {
 	}
 }
 
-// buildSupportedFormats returns the player's advertised format list.
-// If preferredCodec is set, formats matching that codec are moved to
-// the front so the server is more likely to select them.
-func buildSupportedFormats(preferredCodec string) []protocol.AudioFormat {
+// buildSupportedFormats returns the player's advertised format list,
+// optionally filtered by maxSampleRate / maxBitDepth (0 = no cap) and
+// reordered so preferredCodec entries come first when set.
+//
+// Filter happens before reorder, so the surviving preferred-codec entries
+// stay grouped at the head. Returns an empty slice when the caps exclude
+// every format — callers can detect that and fail loudly. We do NOT
+// fabricate a fallback entry: if the user asks for caps no format can
+// satisfy, the honest response is empty, and the resulting handshake
+// failure is the right user-visible signal.
+func buildSupportedFormats(preferredCodec string, maxSampleRate, maxBitDepth int) []protocol.AudioFormat {
 	allFormats := []protocol.AudioFormat{
 		{Codec: "pcm", Channels: 2, SampleRate: 192000, BitDepth: 24},
 		{Codec: "pcm", Channels: 2, SampleRate: 176400, BitDepth: 24},
@@ -481,14 +500,26 @@ func buildSupportedFormats(preferredCodec string) []protocol.AudioFormat {
 		{Codec: "opus", Channels: 2, SampleRate: 48000, BitDepth: 16},
 	}
 
-	if preferredCodec == "" {
-		return allFormats
+	filtered := make([]protocol.AudioFormat, 0, len(allFormats))
+	for _, f := range allFormats {
+		if maxSampleRate > 0 && f.SampleRate > maxSampleRate {
+			continue
+		}
+		if maxBitDepth > 0 && f.BitDepth > maxBitDepth {
+			continue
+		}
+		filtered = append(filtered, f)
 	}
 
-	// Move preferred codec formats to the front.
-	preferred := make([]protocol.AudioFormat, 0, len(allFormats))
-	rest := make([]protocol.AudioFormat, 0, len(allFormats))
-	for _, f := range allFormats {
+	if preferredCodec == "" {
+		return filtered
+	}
+
+	// Move preferred codec formats to the front while preserving original
+	// order within each group.
+	preferred := make([]protocol.AudioFormat, 0, len(filtered))
+	rest := make([]protocol.AudioFormat, 0, len(filtered))
+	for _, f := range filtered {
 		if f.Codec == preferredCodec {
 			preferred = append(preferred, f)
 		} else {
@@ -496,6 +527,43 @@ func buildSupportedFormats(preferredCodec string) []protocol.AudioFormat {
 		}
 	}
 	return append(preferred, rest...)
+}
+
+// logAdvertisedFormats writes one summary line describing what the player
+// is about to send in client/hello — codec set, max rate, max depth, and
+// the cap that produced the list. Operators reading the log can answer
+// "what did this player say it could do?" without having to inspect server
+// traces.
+//
+// Empty list goes out as a WARNING: the resulting handshake produces only
+// a generic negotiation failure, so surfacing the cause player-side saves
+// users from chasing the same symptom on the server.
+func logAdvertisedFormats(formats []protocol.AudioFormat, maxSampleRate, maxBitDepth int) {
+	capDesc := "no cap"
+	if maxSampleRate > 0 || maxBitDepth > 0 {
+		capDesc = fmt.Sprintf("cap %dHz/%d-bit", maxSampleRate, maxBitDepth)
+	}
+	if len(formats) == 0 {
+		log.Printf("WARNING: advertising 0 supported formats (%s) — handshake will fail; relax the caps", capDesc)
+		return
+	}
+	codecsSeen := make(map[string]struct{}, 3)
+	codecsOrdered := make([]string, 0, 3)
+	var maxRate, maxDepth int
+	for _, f := range formats {
+		if _, ok := codecsSeen[f.Codec]; !ok {
+			codecsSeen[f.Codec] = struct{}{}
+			codecsOrdered = append(codecsOrdered, f.Codec)
+		}
+		if f.SampleRate > maxRate {
+			maxRate = f.SampleRate
+		}
+		if f.BitDepth > maxDepth {
+			maxDepth = f.BitDepth
+		}
+	}
+	log.Printf("Advertising %d supported formats: codecs=[%s] max=%dHz/%d-bit (%s)",
+		len(formats), strings.Join(codecsOrdered, ","), maxRate, maxDepth, capDesc)
 }
 
 func (r *Receiver) notifyError(err error) {

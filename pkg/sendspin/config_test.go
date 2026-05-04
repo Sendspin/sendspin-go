@@ -122,6 +122,8 @@ func newTestFlagSet() (*flag.FlagSet, map[string]*string, map[string]*int, map[s
 		"buffer-ms":       fs.Int("buffer-ms", 150, "buffer ms"),
 		"static-delay-ms": fs.Int("static-delay-ms", 0, "static delay"),
 		"buffer-capacity": fs.Int("buffer-capacity", 1048576, "buffer cap"),
+		"max-sample-rate": fs.Int("max-sample-rate", 0, "max sample rate"),
+		"max-bit-depth":   fs.Int("max-bit-depth", 0, "max bit depth"),
 	}
 	bools := map[string]*bool{
 		"no-tui":       fs.Bool("no-tui", false, "no tui"),
@@ -222,6 +224,93 @@ func TestApplyEnvAndFile_InvalidEnvReturnsError(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "port") {
 		t.Errorf("error should mention the offending flag: %v", err)
+	}
+}
+
+// TestApplyEnvAndFile_MaxSampleRateAndBitDepth covers the output-capability
+// override keys end-to-end: file value flows through, env beats file, CLI
+// beats env. Same precedence as every other key, but worth a dedicated test:
+// these are the operator's escape hatch when the auto-probe is wrong, and a
+// silent bug here means users can't override.
+func TestApplyEnvAndFile_MaxSampleRateAndBitDepth(t *testing.T) {
+	t.Run("file fills both", func(t *testing.T) {
+		fs, _, ints, _ := newTestFlagSet()
+		if err := fs.Parse(nil); err != nil {
+			t.Fatalf("parse: %v", err)
+		}
+		rate, depth := 48000, 16
+		cfg := &PlayerConfigFile{MaxSampleRate: &rate, MaxBitDepth: &depth}
+		if err := ApplyEnvAndFile(fs, map[string]bool{}, PlayerEnvPrefix, cfg.AsStringMap()); err != nil {
+			t.Fatalf("apply: %v", err)
+		}
+		if *ints["max-sample-rate"] != 48000 {
+			t.Errorf("max-sample-rate = %d, want 48000", *ints["max-sample-rate"])
+		}
+		if *ints["max-bit-depth"] != 16 {
+			t.Errorf("max-bit-depth = %d, want 16", *ints["max-bit-depth"])
+		}
+	})
+
+	t.Run("env beats file", func(t *testing.T) {
+		fs, _, ints, _ := newTestFlagSet()
+		if err := fs.Parse(nil); err != nil {
+			t.Fatalf("parse: %v", err)
+		}
+		t.Setenv("SENDSPIN_PLAYER_MAX_SAMPLE_RATE", "96000")
+		rate := 48000
+		cfg := &PlayerConfigFile{MaxSampleRate: &rate}
+		if err := ApplyEnvAndFile(fs, map[string]bool{}, PlayerEnvPrefix, cfg.AsStringMap()); err != nil {
+			t.Fatalf("apply: %v", err)
+		}
+		if *ints["max-sample-rate"] != 96000 {
+			t.Errorf("env should beat file: max-sample-rate = %d", *ints["max-sample-rate"])
+		}
+	})
+
+	t.Run("CLI beats env and file", func(t *testing.T) {
+		fs, _, ints, _ := newTestFlagSet()
+		if err := fs.Parse([]string{"-max-sample-rate", "192000"}); err != nil {
+			t.Fatalf("parse: %v", err)
+		}
+		setByUser := map[string]bool{"max-sample-rate": true}
+		t.Setenv("SENDSPIN_PLAYER_MAX_SAMPLE_RATE", "96000")
+		rate := 48000
+		cfg := &PlayerConfigFile{MaxSampleRate: &rate}
+		if err := ApplyEnvAndFile(fs, setByUser, PlayerEnvPrefix, cfg.AsStringMap()); err != nil {
+			t.Fatalf("apply: %v", err)
+		}
+		if *ints["max-sample-rate"] != 192000 {
+			t.Errorf("CLI should win: max-sample-rate = %d", *ints["max-sample-rate"])
+		}
+	})
+}
+
+// TestPlayerConfigFile_AsStringMap_OmitsUnsetCaps guards a subtle precedence
+// bug: if AsStringMap emitted "0" for an unset *int field, that "0" would
+// flow through ApplyEnvAndFile as an explicit value and clobber any flag
+// default, env override, or CLI flag the user actually set. The pointer-vs-
+// nil distinction in the YAML field is the only thing keeping the precedence
+// chain honest, and AsStringMap must respect it.
+func TestPlayerConfigFile_AsStringMap_OmitsUnsetCaps(t *testing.T) {
+	cfg := &PlayerConfigFile{} // all fields nil/empty
+	m := cfg.AsStringMap()
+	if _, ok := m["max_sample_rate"]; ok {
+		t.Error("max_sample_rate should be absent when not set in YAML")
+	}
+	if _, ok := m["max_bit_depth"]; ok {
+		t.Error("max_bit_depth should be absent when not set in YAML")
+	}
+
+	// Set explicitly to zero — the user genuinely wants 0, which means
+	// "no cap, auto-probe". Pointer is non-nil so the key DOES appear.
+	zero := 0
+	cfg = &PlayerConfigFile{MaxSampleRate: &zero, MaxBitDepth: &zero}
+	m = cfg.AsStringMap()
+	if got := m["max_sample_rate"]; got != "0" {
+		t.Errorf("explicit zero should round-trip; got %q", got)
+	}
+	if got := m["max_bit_depth"]; got != "0" {
+		t.Errorf("explicit zero should round-trip; got %q", got)
 	}
 }
 
