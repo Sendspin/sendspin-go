@@ -5,13 +5,14 @@ go 1.24.1
 require (
 	github.com/charmbracelet/bubbletea v1.3.10
 	github.com/charmbracelet/lipgloss v1.1.0
-	github.com/gen2brain/malgo v0.11.21
+	github.com/gen2brain/malgo v0.11.24
 	github.com/google/uuid v1.6.0
 	github.com/gorilla/websocket v1.5.3
 	github.com/hajimehoshi/go-mp3 v0.3.4
 	github.com/hashicorp/mdns v1.0.6
 	github.com/mewkiz/flac v1.0.13
 	gopkg.in/hraban/opus.v2 v2.0.0-20230925203106-0188a62cb302
+	gopkg.in/yaml.v3 v3.0.1
 )
 
 require (
@@ -40,5 +41,4 @@ require (
 	golang.org/x/sys v0.36.0 // indirect
 	golang.org/x/text v0.23.0 // indirect
 	golang.org/x/tools v0.21.1-0.20240508182429-e35e4ccd0d2d // indirect
-	gopkg.in/yaml.v3 v3.0.1 // indirect
 )

@@ -261,6 +261,18 @@ func (m *Malgo) Open(sampleRate, channels, bitDepth int) error {
 	deviceConfig.Playback.Channels = uint32(channels)
 	deviceConfig.SampleRate = uint32(sampleRate)
 	deviceConfig.Alsa.NoMMap = 1
+	// Pin the period to 20 ms instead of miniaudio's default low-latency
+	// 10 ms. Several backends (bcm2835 ALSA on Pi, PulseAudio/PipeWire on
+	// some Intel Smart Sound paths — see mackron/miniaudio#877) silently
+	// round the requested 10 ms period to a different internal value and
+	// then stall the audio callback after a few invocations. Asking for
+	// 20 ms lands inside the safer range used by miniaudio's own backend
+	// defaults (see CHANGES.md: PulseAudio default raised to 25 ms in
+	// v0.11.8 to work around PipeWire glitches) and gives the driver
+	// enough headroom that the negotiated period matches what we asked
+	// for. ~20 ms of added pipeline latency is invisible inside Sendspin's
+	// 200+ ms scheduler budget.
+	deviceConfig.PeriodSizeInMilliseconds = 20
 
 	// Resolve the playback device. When m.deviceName is empty, miniaudio's
 	// enumerated default is picked (and logged so the operator knows what
@@ -330,8 +342,8 @@ func (m *Malgo) Open(sampleRate, channels, bitDepth int) error {
 	m.bitDepth = bitDepth
 	m.ready = true
 
-	log.Printf("Audio output initialized: device=%s %dHz/%dch/%d-bit (malgo/%s)",
-		chosenLabel, sampleRate, channels, bitDepth, formatName(format))
+	log.Printf("Audio output initialized: device=%s %dHz/%dch/%d-bit period=%dms (malgo/%s)",
+		chosenLabel, sampleRate, channels, bitDepth, deviceConfig.PeriodSizeInMilliseconds, formatName(format))
 
 	return nil
 }
