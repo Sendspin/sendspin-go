@@ -227,11 +227,11 @@ func TestApplyEnvAndFile_InvalidEnvReturnsError(t *testing.T) {
 	}
 }
 
-// TestApplyEnvAndFile_MaxSampleRateAndBitDepth covers the new output-capability
-// override keys end-to-end: file value flows through, env beats file, CLI beats
-// env. Same precedence as every other key — but worth a dedicated test because
-// these are the user's escape hatch when the auto-probe is wrong, and a silent
-// bug here means users can't override.
+// TestApplyEnvAndFile_MaxSampleRateAndBitDepth covers the output-capability
+// override keys end-to-end: file value flows through, env beats file, CLI
+// beats env. Same precedence as every other key, but worth a dedicated test:
+// these are the operator's escape hatch when the auto-probe is wrong, and a
+// silent bug here means users can't override.
 func TestApplyEnvAndFile_MaxSampleRateAndBitDepth(t *testing.T) {
 	t.Run("file fills both", func(t *testing.T) {
 		fs, _, ints, _ := newTestFlagSet()

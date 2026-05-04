@@ -530,13 +530,14 @@ func buildSupportedFormats(preferredCodec string, maxSampleRate, maxBitDepth int
 }
 
 // logAdvertisedFormats writes one summary line describing what the player
-// is about to send in client/hello. Future bug reports include this line so
-// "what did the player say it could do?" stops being a question we have to
-// reverse-engineer from server logs.
+// is about to send in client/hello — codec set, max rate, max depth, and
+// the cap that produced the list. Operators reading the log can answer
+// "what did this player say it could do?" without having to inspect server
+// traces.
 //
-// Empty list is logged loudly as a warning because the resulting handshake
-// will produce only a generic negotiation failure — surfacing the cause at
-// the player keeps the user out of the wrong rabbit hole.
+// Empty list goes out as a WARNING: the resulting handshake produces only
+// a generic negotiation failure, so surfacing the cause player-side saves
+// users from chasing the same symptom on the server.
 func logAdvertisedFormats(formats []protocol.AudioFormat, maxSampleRate, maxBitDepth int) {
 	capDesc := "no cap"
 	if maxSampleRate > 0 || maxBitDepth > 0 {

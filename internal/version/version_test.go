@@ -60,9 +60,9 @@ func TestManufacturerFormat(t *testing.T) {
 
 func TestVersionLdflagsPatchable(t *testing.T) {
 	// Version, Product, and Manufacturer are package-level string vars so the
-	// release workflow can patch Version via -ldflags "-X .../version.Version=v1.6.3".
-	// This test just verifies the symbols are accessible. We deliberately don't
-	// assert immutability — that's exactly what we gave up to make ldflags work.
+	// release workflow can patch Version via -ldflags -X. Verify the symbols
+	// are accessible; immutability is intentionally not asserted, since
+	// patchability requires var declarations.
 	if Version == "" {
 		t.Error("Version is empty")
 	}

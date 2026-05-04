@@ -196,11 +196,11 @@ func TestPlayer_StatusBeforeConnect(t *testing.T) {
 	}
 }
 
-// TestPlayer_EnsureCapsResolved_ExplicitOverrideSkipsProbe asserts the
-// "replace" semantics from the design discussion: if the user has set either
-// MaxSampleRate or MaxBitDepth, ensureCapsResolved must NOT overwrite the
-// other field via probe — explicit user choice wins entirely, even when
-// only one of the two fields is non-zero.
+// TestPlayer_EnsureCapsResolved_ExplicitOverrideSkipsProbe asserts replace
+// semantics: if the user has set either MaxSampleRate or MaxBitDepth,
+// ensureCapsResolved must NOT overwrite the other field via probe.
+// Explicit user choice wins entirely, even when only one of the two
+// fields is non-zero.
 func TestPlayer_EnsureCapsResolved_ExplicitOverrideSkipsProbe(t *testing.T) {
 	tests := []struct {
 		name      string
