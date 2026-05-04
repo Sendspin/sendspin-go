@@ -17,7 +17,7 @@ if [[ "$OSTYPE" == "darwin"* ]]; then
     fi
 
     echo "Installing audio libraries via Homebrew..."
-    brew install opus opusfile flac
+    brew install opus opusfile
 
 elif [[ "$OSTYPE" == "linux-gnu"* ]]; then
     # Linux
@@ -27,20 +27,19 @@ elif [[ "$OSTYPE" == "linux-gnu"* ]]; then
         # Debian/Ubuntu
         echo "Installing audio libraries via apt..."
         sudo apt-get update
-        sudo apt-get install -y libopus-dev libopusfile-dev libflac-dev
+        sudo apt-get install -y libopus-dev libopusfile-dev
     elif command -v dnf &> /dev/null; then
         # Fedora/RHEL
         echo "Installing audio libraries via dnf..."
-        sudo dnf install -y opus-devel opusfile-devel flac-devel
+        sudo dnf install -y opus-devel opusfile-devel
     elif command -v pacman &> /dev/null; then
         # Arch Linux
         echo "Installing audio libraries via pacman..."
-        sudo pacman -S --noconfirm opus opusfile flac
+        sudo pacman -S --noconfirm opus opusfile
     else
         echo "Error: Unsupported Linux distribution. Please install manually:"
         echo "  - libopus / opus-devel"
         echo "  - libopusfile / opusfile-devel"
-        echo "  - libflac / flac-devel"
         exit 1
     fi
 else

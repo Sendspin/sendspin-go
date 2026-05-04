@@ -136,10 +136,12 @@ do_uninstall() {
 install_apt_deps() {
     log "Installing runtime dependencies..."
     DEBIAN_FRONTEND=noninteractive apt-get update -qq
+    # FLAC decode/encode is provided by the pure-Go mewkiz/flac module; no
+    # system libflac is linked in. apt resolves libasound2 to libasound2t64
+    # automatically on time_t-64 distros (Trixie, Ubuntu 24.04).
     DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
         libopus0 \
         libopusfile0 \
-        libflac12 \
         libasound2 \
         ca-certificates \
         curl \
