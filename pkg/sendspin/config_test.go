@@ -118,12 +118,12 @@ func newTestFlagSet() (*flag.FlagSet, map[string]*string, map[string]*int, map[s
 		"client-id":       fs.String("client-id", "", "client id"),
 	}
 	ints := map[string]*int{
-		"port":             fs.Int("port", 8927, "port"),
-		"buffer-ms":        fs.Int("buffer-ms", 150, "buffer ms"),
-		"static-delay-ms":  fs.Int("static-delay-ms", 0, "static delay"),
-		"buffer-capacity":  fs.Int("buffer-capacity", 1048576, "buffer cap"),
-		"max-sample-rate":  fs.Int("max-sample-rate", 0, "max sample rate"),
-		"max-bit-depth":    fs.Int("max-bit-depth", 0, "max bit depth"),
+		"port":            fs.Int("port", 8927, "port"),
+		"buffer-ms":       fs.Int("buffer-ms", 150, "buffer ms"),
+		"static-delay-ms": fs.Int("static-delay-ms", 0, "static delay"),
+		"buffer-capacity": fs.Int("buffer-capacity", 1048576, "buffer cap"),
+		"max-sample-rate": fs.Int("max-sample-rate", 0, "max sample rate"),
+		"max-bit-depth":   fs.Int("max-bit-depth", 0, "max bit depth"),
 	}
 	bools := map[string]*bool{
 		"no-tui":       fs.Bool("no-tui", false, "no tui"),
