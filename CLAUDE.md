@@ -11,7 +11,7 @@ This guidance is aimed at Claude Code but may also be suitable for other AI tool
 
 ## Commands
 
-Native deps: `libopus`, `libopusfile`, `libflac`. Use `./install-deps.sh` (handles brew/apt/dnf/pacman) or the per-OS commands in README.md. `ffmpeg` is only required for HLS/m3u8 server input.
+Native deps: `libopus`, `libopusfile`. FLAC is pure-Go (`mewkiz/flac`) so no `libflac` is required at build or runtime — older docs/scripts that listed it were carrying a phantom dependency. Use `./install-deps.sh` (handles brew/apt/dnf/pacman) or the per-OS commands in README.md. `ffmpeg` is only required for HLS/m3u8 server input.
 
 ```bash
 make                            # Build sendspin-player + sendspin-server
