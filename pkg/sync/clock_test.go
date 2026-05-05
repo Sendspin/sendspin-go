@@ -160,7 +160,7 @@ func TestNewClockSyncWithConfig(t *testing.T) {
 	errDefault := csDefault.filter.GetError()
 	errScaled := csScaled.filter.GetError()
 	if !(errScaled < errDefault) {
-		t.Errorf("expected scaled (0.25) error < default (1.0); got scaled=%d default=%d",
+		t.Errorf("expected scaled (0.25) error < default (0.5); got scaled=%d default=%d",
 			errScaled, errDefault)
 	}
 }
