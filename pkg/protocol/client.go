@@ -34,6 +34,22 @@ const (
 	ArtworkChannelCount = 4
 )
 
+// Heartbeat parameters. Vars (not consts) so tests can override with shorter
+// values; production code never mutates them.
+//
+//	pingPeriod: how often we send a control Ping to the server.
+//	pongWait:   read deadline; reset on every Pong arrival.
+//	writeWait:  bound on each WriteControl call so a slow socket doesn't
+//	            block the ping goroutine forever.
+//
+// Invariant: pingPeriod < pongWait. Otherwise the deadline can expire
+// before our next ping has a chance to elicit a pong.
+var (
+	pingPeriod = 30 * time.Second
+	pongWait   = 60 * time.Second
+	writeWait  = 10 * time.Second
+)
+
 type Config struct {
 	ServerAddr          string
 	ClientID            string
@@ -173,9 +189,66 @@ func (c *Client) Start() error {
 		return fmt.Errorf("handshake failed: %w", err)
 	}
 
+	// Snapshot the heartbeat vars on Start's goroutine so the values we
+	// pass to pingLoop and the PongHandler are read here, not from the
+	// goroutines we're about to spawn. Tests mutate these package-level
+	// vars between test cases; the snapshot establishes a happens-before
+	// from the mutation site to the goroutine read, which the race
+	// detector requires.
+	pp, pw, ww := pingPeriod, pongWait, writeWait
+
+	// Install PongHandler that resets the read deadline. The handler runs
+	// synchronously from ReadMessage's goroutine, so SetReadDeadline is
+	// safe to call from here.
+	conn.SetPongHandler(func(string) error {
+		return conn.SetReadDeadline(time.Now().Add(pw))
+	})
+
+	// Initial deadline. If the server never pongs, ReadMessage in
+	// readMessages will hit this deadline and exit, triggering Close().
+	if err := conn.SetReadDeadline(time.Now().Add(pw)); err != nil {
+		c.Close()
+		return fmt.Errorf("set read deadline: %w", err)
+	}
+
 	go c.readMessages()
+	go c.pingLoop(pp, ww)
 
 	return nil
+}
+
+// pingLoop sends a periodic WebSocket control ping. The server's pong
+// reply arrives via the PongHandler installed in Start, which resets
+// the read deadline. Exits on context cancel or write failure; on
+// write failure we just return — readMessages's defer is responsible
+// for the Close, so calling it from here would race that path.
+//
+// The period and write deadline are passed as args (rather than read
+// from the package vars) so the read happens-before the goroutine
+// launch; tests that mutate the package vars between cases stay clean
+// under -race.
+func (c *Client) pingLoop(period, writeDeadline time.Duration) {
+	ticker := time.NewTicker(period)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ticker.C:
+			c.mu.RLock()
+			conn := c.conn
+			c.mu.RUnlock()
+			if conn == nil {
+				return
+			}
+			if err := conn.WriteControl(websocket.PingMessage, nil, time.Now().Add(writeDeadline)); err != nil {
+				// Write failure on a control frame means the connection
+				// is going down. Don't bother retrying — readMessages
+				// will hit the read deadline and tear down.
+				return
+			}
+		case <-c.ctx.Done():
+			return
+		}
+	}
 }
 
 func (c *Client) handshake() error {
