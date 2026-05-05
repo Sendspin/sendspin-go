@@ -7,9 +7,11 @@ import (
 	"encoding/json"
 	"fmt"
 	"log"
+	"net"
 	"net/http"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/Sendspin/sendspin-go/internal/discovery"
@@ -68,6 +70,7 @@ type Server struct {
 
 	httpServer *http.Server
 	mux        *http.ServeMux
+	boundAddr  atomic.Pointer[net.TCPAddr]
 
 	clients      map[string]*ServerClient
 	clientsMu    sync.RWMutex
@@ -100,9 +103,12 @@ type ClientInfo struct {
 }
 
 func NewServer(config ServerConfig) (*Server, error) {
-	if config.Port == 0 {
-		config.Port = 8927
-	}
+	// Port == 0 is honored as "let the OS pick an ephemeral port". The
+	// CLI / config-file layers supply 8927 as the documented default
+	// before reaching this point; library callers that omit Port get
+	// ephemeral binding (and can read it back via Server.Addr after
+	// Start). This is the substitution-free behavior tests rely on for
+	// flake-free Port: 0 binding.
 	if config.Name == "" {
 		config.Name = "Sendspin Server"
 	}
@@ -216,16 +222,22 @@ func (s *Server) Start() error {
 	}()
 
 	addr := fmt.Sprintf(":%d", s.config.Port)
-	log.Printf("WebSocket server listening on %s", addr)
+
+	listener, err := net.Listen("tcp", addr)
+	if err != nil {
+		return fmt.Errorf("listen on %s: %w", addr, err)
+	}
+	tcpAddr, _ := listener.Addr().(*net.TCPAddr)
+	s.boundAddr.Store(tcpAddr)
+	log.Printf("WebSocket server listening on %s", listener.Addr())
 
 	s.httpServer = &http.Server{
-		Addr:    addr,
 		Handler: s.mux,
 	}
 
 	errChan := make(chan error, 1)
 	go func() {
-		if err := s.httpServer.ListenAndServe(); err != http.ErrServerClosed {
+		if err := s.httpServer.Serve(listener); err != http.ErrServerClosed {
 			errChan <- err
 		}
 	}()
@@ -289,6 +301,17 @@ func (s *Server) getClockMicros() int64 {
 // GroupRole implementations (M3) can subscribe to its event bus.
 func (s *Server) Group() *Group {
 	return s.defaultGroup
+}
+
+// Addr returns the network address the server is listening on, or nil if
+// Start has not yet bound a listener. Useful in tests that configure
+// Port: 0 (OS-assigned ephemeral port) and need to know the actual port
+// after Start runs.
+func (s *Server) Addr() net.Addr {
+	if a := s.boundAddr.Load(); a != nil {
+		return a
+	}
+	return nil
 }
 
 func (s *Server) Clients() []ClientInfo {

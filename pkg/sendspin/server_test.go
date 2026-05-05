@@ -5,12 +5,28 @@ package sendspin
 import (
 	"encoding/json"
 	"fmt"
+	"net"
 	"testing"
 	"time"
 
 	"github.com/Sendspin/sendspin-go/pkg/protocol"
 	"github.com/gorilla/websocket"
 )
+
+// waitForServerPort polls until server.Addr() returns the bound TCP port
+// after Start runs with Port: 0. Fails the test if the listener isn't
+// bound within 2s.
+func waitForServerPort(t *testing.T, server *Server) int {
+	t.Helper()
+	deadline := time.Now().Add(2 * time.Second)
+	for server.Addr() == nil {
+		if time.Now().After(deadline) {
+			t.Fatal("server did not bind within 2s")
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	return server.Addr().(*net.TCPAddr).Port
+}
 
 func TestNewServer(t *testing.T) {
 	source := NewTestTone(48000, 2)
@@ -23,7 +39,7 @@ func TestNewServer(t *testing.T) {
 		{
 			name: "valid config",
 			config: ServerConfig{
-				Port:   8928,
+				Port:   0,
 				Name:   "Test Server",
 				Source: source,
 			},
@@ -32,13 +48,13 @@ func TestNewServer(t *testing.T) {
 		{
 			name: "missing source",
 			config: ServerConfig{
-				Port: 8928,
+				Port: 0,
 				Name: "Test Server",
 			},
 			expectErr: true,
 		},
 		{
-			name: "default port",
+			name: "ephemeral port (omitted)",
 			config: ServerConfig{
 				Name:   "Test Server",
 				Source: source,
@@ -48,7 +64,7 @@ func TestNewServer(t *testing.T) {
 		{
 			name: "default name",
 			config: ServerConfig{
-				Port:   8928,
+				Port:   0,
 				Source: source,
 			},
 			expectErr: false,
@@ -74,10 +90,9 @@ func TestNewServer(t *testing.T) {
 				t.Fatal("expected server to be created")
 			}
 
-			// Verify defaults
-			if server.config.Port == 0 {
-				t.Error("port should have been set to default")
-			}
+			// NewServer no longer substitutes a default Port — Port: 0 is
+			// honored as "let the OS pick" so tests bind ephemerally.
+			// Name still defaults when omitted.
 			if server.config.Name == "" {
 				t.Error("name should have been set to default")
 			}
@@ -89,7 +104,7 @@ func TestServerStartStop(t *testing.T) {
 	source := NewTestTone(48000, 2)
 
 	server, err := NewServer(ServerConfig{
-		Port:   8929,
+		Port:   0,
 		Name:   "Test Server",
 		Source: source,
 	})
@@ -103,7 +118,8 @@ func TestServerStartStop(t *testing.T) {
 		errChan <- server.Start()
 	}()
 
-	// Give server time to start
+	// Wait for listener to bind, then give the rest of Start a moment.
+	waitForServerPort(t, server)
 	time.Sleep(100 * time.Millisecond)
 
 	// Stop server
@@ -124,7 +140,7 @@ func TestServerClientConnection(t *testing.T) {
 	source := NewTestTone(48000, 2)
 
 	server, err := NewServer(ServerConfig{
-		Port:   8930,
+		Port:   0,
 		Name:   "Test Server",
 		Source: source,
 		Debug:  true,
@@ -139,11 +155,12 @@ func TestServerClientConnection(t *testing.T) {
 		errChan <- server.Start()
 	}()
 
-	// Give server time to start
+	// Wait for listener to bind, then give the rest of Start a moment.
+	port := waitForServerPort(t, server)
 	time.Sleep(200 * time.Millisecond)
 
 	// Connect as client
-	wsURL := "ws://localhost:8930/sendspin"
+	wsURL := fmt.Sprintf("ws://localhost:%d/sendspin", port)
 	conn, _, err := websocket.DefaultDialer.Dial(wsURL, nil)
 	if err != nil {
 		t.Fatalf("failed to connect to server: %v", err)
@@ -310,7 +327,7 @@ func TestServerMultipleClients(t *testing.T) {
 	source := NewTestTone(48000, 2)
 
 	server, err := NewServer(ServerConfig{
-		Port:   8931,
+		Port:   0,
 		Name:   "Test Server",
 		Source: source,
 	})
@@ -320,12 +337,13 @@ func TestServerMultipleClients(t *testing.T) {
 
 	// Start server
 	go server.Start()
+	port := waitForServerPort(t, server)
 	time.Sleep(200 * time.Millisecond)
 
 	// Connect multiple clients
 	clients := make([]*websocket.Conn, 3)
+	wsURL := fmt.Sprintf("ws://localhost:%d/sendspin", port)
 	for i := 0; i < 3; i++ {
-		wsURL := "ws://localhost:8931/sendspin"
 		conn, _, err := websocket.DefaultDialer.Dial(wsURL, nil)
 		if err != nil {
 			t.Fatalf("failed to connect client %d: %v", i, err)
@@ -407,7 +425,7 @@ func TestServerMultipleClients(t *testing.T) {
 // provide.
 func TestServer_GroupReceivesEventsFromRealHandshake(t *testing.T) {
 	server, err := NewServer(ServerConfig{
-		Port:   8933,
+		Port:   0,
 		Name:   "Group Wiring Test",
 		Source: NewTestTone(48000, 2),
 	})
@@ -430,9 +448,10 @@ func TestServer_GroupReceivesEventsFromRealHandshake(t *testing.T) {
 		}
 	}()
 
+	port := waitForServerPort(t, server)
 	time.Sleep(200 * time.Millisecond)
 
-	conn, _, err := websocket.DefaultDialer.Dial("ws://localhost:8933/sendspin", nil)
+	conn, _, err := websocket.DefaultDialer.Dial(fmt.Sprintf("ws://localhost:%d/sendspin", port), nil)
 	if err != nil {
 		t.Fatalf("dial: %v", err)
 	}
@@ -497,7 +516,7 @@ func TestServer_ControllerCommandEndToEnd(t *testing.T) {
 	commandReceived := make(chan string, 1)
 
 	server, err := NewServer(ServerConfig{
-		Port:   8934,
+		Port:   0,
 		Name:   "Controller Test",
 		Source: NewTestTone(48000, 2),
 	})
@@ -524,9 +543,10 @@ func TestServer_ControllerCommandEndToEnd(t *testing.T) {
 		}
 	}()
 
+	port := waitForServerPort(t, server)
 	time.Sleep(200 * time.Millisecond)
 
-	conn, _, err := websocket.DefaultDialer.Dial("ws://localhost:8934/sendspin", nil)
+	conn, _, err := websocket.DefaultDialer.Dial(fmt.Sprintf("ws://localhost:%d/sendspin", port), nil)
 	if err != nil {
 		t.Fatalf("dial: %v", err)
 	}
@@ -677,7 +697,7 @@ func TestServerDuplicateClientID(t *testing.T) {
 	source := NewTestTone(48000, 2)
 
 	server, err := NewServer(ServerConfig{
-		Port:   8932,
+		Port:   0,
 		Name:   "Test Server",
 		Source: source,
 	})
@@ -687,10 +707,11 @@ func TestServerDuplicateClientID(t *testing.T) {
 
 	// Start server
 	go server.Start()
+	port := waitForServerPort(t, server)
 	time.Sleep(200 * time.Millisecond)
 
 	// Connect first client
-	wsURL := "ws://localhost:8932/sendspin"
+	wsURL := fmt.Sprintf("ws://localhost:%d/sendspin", port)
 	conn1, _, err := websocket.DefaultDialer.Dial(wsURL, nil)
 	if err != nil {
 		t.Fatalf("failed to connect first client: %v", err)
@@ -757,7 +778,7 @@ func TestServerDuplicateClientID(t *testing.T) {
 // and a valid codec_header, followed by binary FLAC audio chunks.
 func TestServer_FLACStreamNegotiation(t *testing.T) {
 	s, err := NewServer(ServerConfig{
-		Port:   8936,
+		Port:   0,
 		Name:   "FLAC Test Server",
 		Source: NewTestTone(48000, 2),
 	})
@@ -776,9 +797,10 @@ func TestServer_FLACStreamNegotiation(t *testing.T) {
 		}
 	}()
 
+	port := waitForServerPort(t, s)
 	time.Sleep(200 * time.Millisecond)
 
-	conn, _, err := websocket.DefaultDialer.Dial("ws://localhost:8936/sendspin", nil)
+	conn, _, err := websocket.DefaultDialer.Dial(fmt.Sprintf("ws://localhost:%d/sendspin", port), nil)
 	if err != nil {
 		t.Fatalf("dial: %v", err)
 	}
@@ -878,7 +900,7 @@ func TestServer_FLACStreamNegotiation(t *testing.T) {
 // capacity, because the server skips sends when the tracker is full.
 func TestServer_BufferTrackerLimitsChunks(t *testing.T) {
 	s, err := NewServer(ServerConfig{
-		Port:   8937,
+		Port:   0,
 		Name:   "Buffer Test",
 		Source: NewTestTone(48000, 2),
 		Debug:  true,
@@ -898,6 +920,7 @@ func TestServer_BufferTrackerLimitsChunks(t *testing.T) {
 		}
 	}()
 
+	port := waitForServerPort(t, s)
 	time.Sleep(200 * time.Millisecond)
 
 	// Connect with a small buffer capacity (20000 bytes).
@@ -906,7 +929,7 @@ func TestServer_BufferTrackerLimitsChunks(t *testing.T) {
 	// chunks at a time. As playback time advances, PruneConsumed frees
 	// slots, but the tracker still throttles the send rate well below 50
 	// chunks/second.
-	conn, _, err := websocket.DefaultDialer.Dial("ws://localhost:8937/sendspin", nil)
+	conn, _, err := websocket.DefaultDialer.Dial(fmt.Sprintf("ws://localhost:%d/sendspin", port), nil)
 	if err != nil {
 		t.Fatalf("dial: %v", err)
 	}
