@@ -33,7 +33,7 @@ repos:
 
       - id: go-build-all
         name: go build all binaries
-        entry: bash -c 'go build -v -o sendspin-player . && go build -v ./cmd/test-sync'
+        entry: bash -c 'go build -v -o sendspin-player . && go build -v -o sendspin-server ./cmd/sendspin-server'
         language: system
         files: \.go$
         pass_filenames: false
