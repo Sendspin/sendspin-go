@@ -26,6 +26,26 @@ const (
 	QualityLost
 )
 
+// Quality thresholds in microseconds of offset σ (filter.GetError()).
+// QualityGood: filter has converged; sub-100µs sync uncertainty.
+// QualityDegraded: filter still useful but uncertainty is large.
+// QualityLost: no recent sync OR uncertainty so high the estimate is suspect.
+const (
+	qualityGoodMaxErrorUs     = 100
+	qualityDegradedMaxErrorUs = 5000
+)
+
+func qualityFromError(errUs int64) Quality {
+	switch {
+	case errUs < qualityGoodMaxErrorUs:
+		return QualityGood
+	case errUs < qualityDegradedMaxErrorUs:
+		return QualityDegraded
+	default:
+		return QualityLost
+	}
+}
+
 func NewClockSync() *ClockSync {
 	return NewClockSyncWithConfig(DefaultTimeFilterConfig())
 }
@@ -50,23 +70,12 @@ func (cs *ClockSync) ProcessSyncResponse(t1, t2, t3, t4 int64) {
 	cs.rtt = rtt
 	cs.lastSync = time.Now()
 
-	// Discard samples with high RTT (network congestion)
-	if rtt > 100000 { // 100ms
-		log.Printf("Discarding sync sample: high RTT %dμs", rtt)
-		return
-	}
-
-	// NTP-style offset and uncertainty
+	// NTP-style offset and uncertainty.
 	measurement := ((t2 - t1) + (t3 - t4)) / 2
 	maxError := rtt / 2
 
 	cs.filter.Update(measurement, maxError, t4)
-
-	if rtt < 50000 {
-		cs.quality = QualityGood
-	} else {
-		cs.quality = QualityDegraded
-	}
+	cs.quality = qualityFromError(cs.filter.GetError())
 
 	cs.sampleCount++
 
