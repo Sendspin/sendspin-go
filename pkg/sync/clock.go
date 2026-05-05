@@ -27,8 +27,17 @@ const (
 )
 
 func NewClockSync() *ClockSync {
+	return NewClockSyncWithConfig(DefaultTimeFilterConfig())
+}
+
+// NewClockSyncWithConfig creates a ClockSync with a caller-supplied filter
+// configuration. Use this when you need to deviate from
+// DefaultTimeFilterConfig — for example, when running closer to the
+// canonical Sendspin time-filter defaults documented at
+// https://github.com/Sendspin/time-filter.
+func NewClockSyncWithConfig(cfg TimeFilterConfig) *ClockSync {
 	return &ClockSync{
-		filter:  NewTimeFilter(DefaultTimeFilterConfig()),
+		filter:  NewTimeFilter(cfg),
 		quality: QualityLost,
 	}
 }

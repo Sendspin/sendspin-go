@@ -6,4 +6,7 @@
 // Uses a two-dimensional Kalman filter to track both clock offset and drift
 // between client and server, following the Sendspin time filter specification.
 // NTP-style round-trip time measurements feed the filter for optimal estimation.
+//
+// Reference: https://github.com/Sendspin/time-filter — Apache-2.0,
+// canonical C++ implementation and theory.md.
 package sync
