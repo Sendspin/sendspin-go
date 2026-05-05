@@ -563,29 +563,6 @@ func (p *Player) notifyError(err error) {
 	}
 }
 
-// Helper functions used by both player.go and receiver.go
-
-func derefString(s *string) string {
-	if s == nil {
-		return ""
-	}
-	return *s
-}
-
-func derefInt(i *int) int {
-	if i == nil {
-		return 0
-	}
-	return *i
-}
-
-func getDurationSeconds(p *protocol.ProgressState) int {
-	if p == nil {
-		return 0
-	}
-	return p.TrackDuration / 1000
-}
-
 func containsRole(roles []string, role string) bool {
 	for _, r := range roles {
 		if r == role {
