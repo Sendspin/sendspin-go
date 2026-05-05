@@ -208,6 +208,103 @@ func TestGroup_ConcurrentPublishClose(t *testing.T) {
 	<-done
 }
 
+// TestGroup_SetPlaybackState_PublishesOnChange confirms that
+// SetPlaybackState publishes a GroupPlaybackStateChangedEvent only on
+// actual transitions, and is a silent no-op on same-state writes. The
+// group's default state is "playing" (per NewGroup), so calling
+// SetPlaybackState("playing") first must produce no event; transitioning
+// to "stopped" must produce exactly one event with OldState="playing".
+func TestGroup_SetPlaybackState_PublishesOnChange(t *testing.T) {
+	g := NewGroup("test-group")
+	defer g.Close()
+
+	// Subscribe BEFORE any state writes so we observe every emitted event.
+	events, unsubscribe := g.Subscribe()
+	defer unsubscribe()
+
+	// Same-state write: must not publish (default is "playing").
+	g.SetPlaybackState("playing")
+
+	select {
+	case evt := <-events:
+		t.Fatalf("same-state SetPlaybackState published unexpected event: %T %+v", evt, evt)
+	case <-time.After(30 * time.Millisecond):
+		// Expected: no event.
+	}
+
+	// Real transition: must publish exactly one event.
+	g.SetPlaybackState("stopped")
+
+	select {
+	case evt := <-events:
+		ps, ok := evt.(GroupPlaybackStateChangedEvent)
+		if !ok {
+			t.Fatalf("got %T, want GroupPlaybackStateChangedEvent", evt)
+		}
+		t.Logf("event=%+v", ps)
+		if ps.OldState != "playing" || ps.NewState != "stopped" {
+			t.Errorf("event = %+v, want {OldState: playing, NewState: stopped}", ps)
+		}
+	case <-time.After(100 * time.Millisecond):
+		t.Fatal("timed out waiting for GroupPlaybackStateChangedEvent")
+	}
+
+	// Same-state write again: must not publish.
+	g.SetPlaybackState("stopped")
+
+	select {
+	case evt := <-events:
+		t.Fatalf("repeat same-state SetPlaybackState published unexpected event: %T %+v", evt, evt)
+	case <-time.After(30 * time.Millisecond):
+		// Expected.
+	}
+}
+
+// TestGroup_SetPlaybackState_OldStateInEvent pins that successive
+// transitions carry the prior playback state in OldState — not the empty
+// string, not the first-ever value. This guards against future refactors
+// that might forget to capture oldState before mutation.
+func TestGroup_SetPlaybackState_OldStateInEvent(t *testing.T) {
+	g := NewGroup("test-group")
+	defer g.Close()
+
+	events, unsubscribe := g.Subscribe()
+	defer unsubscribe()
+
+	g.SetPlaybackState("paused")
+	g.SetPlaybackState("playing")
+
+	// First event: playing → paused
+	select {
+	case evt := <-events:
+		ps, ok := evt.(GroupPlaybackStateChangedEvent)
+		if !ok {
+			t.Fatalf("got %T, want GroupPlaybackStateChangedEvent", evt)
+		}
+		t.Logf("event[0]=%+v", ps)
+		if ps.OldState != "playing" || ps.NewState != "paused" {
+			t.Errorf("event[0] = %+v, want {playing, paused}", ps)
+		}
+	case <-time.After(100 * time.Millisecond):
+		t.Fatal("timed out on first event")
+	}
+
+	// Second event: paused → playing
+	select {
+	case evt := <-events:
+		ps, ok := evt.(GroupPlaybackStateChangedEvent)
+		if !ok {
+			t.Fatalf("got %T, want GroupPlaybackStateChangedEvent", evt)
+		}
+		t.Logf("event[1]=%+v", ps)
+		if ps.OldState != "paused" || ps.NewState != "playing" {
+			t.Errorf("event[1] = %+v, want {paused, playing}", ps)
+		}
+	case <-time.After(100 * time.Millisecond):
+		t.Fatal("timed out on second event")
+	}
+}
+
 // TestGroup_AddClientSendsGroupUpdate confirms that addClient sends
 // a group/update message to the joining client before publishing
 // ClientJoinedEvent.
