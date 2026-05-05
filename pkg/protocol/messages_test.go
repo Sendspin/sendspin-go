@@ -168,3 +168,169 @@ func TestStreamStart_PlayerOnlyUnchanged(t *testing.T) {
 		t.Errorf("marshal output = %s, want %s", data, want)
 	}
 }
+
+// TestMetadataState_TristateUnmarshal verifies the wire-protocol contract:
+// an omitted JSON key, an explicit null, and a value must each produce a
+// distinguishable receiver-side signal. The merge layer in
+// pkg/sendspin.Receiver depends on this.
+func TestMetadataState_TristateUnmarshal(t *testing.T) {
+	cases := []struct {
+		name         string
+		json         string
+		wantPtrSet   bool   // is Title pointer non-nil?
+		wantTitle    string // value if non-nil
+		wantHasField bool   // HasField("title")?
+	}{
+		{"omitted", `{"timestamp": 1}`, false, "", false},
+		{"null", `{"timestamp": 1, "title": null}`, false, "", true},
+		{"value", `{"timestamp": 1, "title": "Hello"}`, true, "Hello", true},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			var m MetadataState
+			if err := json.Unmarshal([]byte(tc.json), &m); err != nil {
+				t.Fatalf("unmarshal: %v", err)
+			}
+			if (m.Title != nil) != tc.wantPtrSet {
+				t.Errorf("Title pointer non-nil = %v, want %v", m.Title != nil, tc.wantPtrSet)
+			}
+			if m.Title != nil && *m.Title != tc.wantTitle {
+				t.Errorf("Title value = %q, want %q", *m.Title, tc.wantTitle)
+			}
+			if got := m.HasField("title"); got != tc.wantHasField {
+				t.Errorf("HasField(\"title\") = %v, want %v", got, tc.wantHasField)
+			}
+			// Timestamp must always decode.
+			if m.Timestamp != 1 {
+				t.Errorf("Timestamp = %d, want 1", m.Timestamp)
+			}
+			// HasField("timestamp") should be true in every case
+			// because the wire JSON always carries it here.
+			if !m.HasField("timestamp") {
+				t.Error("HasField(\"timestamp\") = false, want true")
+			}
+		})
+	}
+}
+
+// TestMetadataState_HasFieldInGoConstruction confirms that messages built
+// in process via field assignment (the conformance adapter and any
+// server-side helpers do this) report HasField == true for every field.
+// This is the backwards-compat guarantee callers can rely on.
+func TestMetadataState_HasFieldInGoConstruction(t *testing.T) {
+	title := "T"
+	m := MetadataState{Timestamp: 42, Title: &title}
+	for _, key := range []string{"title", "artist", "album", "progress", "shuffle", "anything"} {
+		if !m.HasField(key) {
+			t.Errorf("HasField(%q) = false on Go-constructed value, want true", key)
+		}
+	}
+}
+
+// TestMetadataState_TristateAcrossAllFields exercises every tristate field
+// at once to make sure the alias-based decoder did not accidentally drop a
+// field type (pointer-to-int, pointer-to-bool, pointer-to-struct).
+func TestMetadataState_TristateAcrossAllFields(t *testing.T) {
+	raw := `{
+		"timestamp": 100,
+		"title": "T",
+		"artist": null,
+		"album": "A",
+		"album_artist": null,
+		"artwork_url": "http://x",
+		"year": 2020,
+		"track": null,
+		"progress": {"track_progress": 1000, "track_duration": 5000, "playback_speed": 1000},
+		"shuffle": true
+	}`
+	var m MetadataState
+	if err := json.Unmarshal([]byte(raw), &m); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	// Set fields decode to non-nil pointers.
+	if m.Title == nil || *m.Title != "T" {
+		t.Errorf("Title = %v, want pointer to \"T\"", m.Title)
+	}
+	if m.Album == nil || *m.Album != "A" {
+		t.Errorf("Album = %v, want pointer to \"A\"", m.Album)
+	}
+	if m.ArtworkURL == nil || *m.ArtworkURL != "http://x" {
+		t.Errorf("ArtworkURL = %v", m.ArtworkURL)
+	}
+	if m.Year == nil || *m.Year != 2020 {
+		t.Errorf("Year = %v, want pointer to 2020", m.Year)
+	}
+	if m.Shuffle == nil || *m.Shuffle != true {
+		t.Errorf("Shuffle = %v, want pointer to true", m.Shuffle)
+	}
+	if m.Progress == nil {
+		t.Error("Progress = nil, want non-nil")
+	} else if m.Progress.TrackDuration != 5000 {
+		t.Errorf("Progress.TrackDuration = %d, want 5000", m.Progress.TrackDuration)
+	}
+	// Null fields decode to nil pointers but HasField is true.
+	for _, key := range []string{"artist", "album_artist", "track"} {
+		if !m.HasField(key) {
+			t.Errorf("HasField(%q) = false, want true (null is present)", key)
+		}
+	}
+	if m.Artist != nil {
+		t.Errorf("Artist = %v, want nil (null on wire)", m.Artist)
+	}
+	if m.AlbumArtist != nil {
+		t.Errorf("AlbumArtist = %v, want nil (null on wire)", m.AlbumArtist)
+	}
+	if m.Track != nil {
+		t.Errorf("Track = %v, want nil (null on wire)", m.Track)
+	}
+	// Omitted fields: HasField false.
+	if m.HasField("repeat") {
+		t.Error("HasField(\"repeat\") = true, want false (omitted)")
+	}
+	if m.Repeat != nil {
+		t.Errorf("Repeat = %v, want nil (omitted)", m.Repeat)
+	}
+}
+
+// TestMetadataState_RoundTripPreservesValues ensures encoding then
+// decoding a populated MetadataState preserves every value. The wire
+// shape must be unchanged by the new decoder.
+func TestMetadataState_RoundTripPreservesValues(t *testing.T) {
+	title := "Song"
+	artist := "Artist"
+	album := "Album"
+	original := MetadataState{
+		Timestamp: 12345,
+		Title:     &title,
+		Artist:    &artist,
+		Album:     &album,
+		Progress: &ProgressState{
+			TrackProgress: 1000, TrackDuration: 60000, PlaybackSpeed: 1000,
+		},
+	}
+	data, err := json.Marshal(&original)
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	var decoded MetadataState
+	if err := json.Unmarshal(data, &decoded); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if decoded.Timestamp != original.Timestamp {
+		t.Errorf("Timestamp = %d, want %d", decoded.Timestamp, original.Timestamp)
+	}
+	if decoded.Title == nil || *decoded.Title != title {
+		t.Errorf("Title = %v", decoded.Title)
+	}
+	if decoded.Progress == nil || decoded.Progress.TrackDuration != 60000 {
+		t.Errorf("Progress = %+v", decoded.Progress)
+	}
+	// Round-trip preserves presence: the original was constructed in Go
+	// (presentKeys nil → HasField always true), then re-marshaled (omitempty
+	// drops nil pointers), then re-decoded (presentKeys captures only the
+	// fields that survived omitempty). HasField must report present for the
+	// fields we set.
+	if !decoded.HasField("title") || !decoded.HasField("progress") {
+		t.Error("decoded.HasField missed a set field after round-trip")
+	}
+}

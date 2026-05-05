@@ -2,6 +2,8 @@
 // ABOUTME: Defines structs for all message types per the Sendspin spec
 package protocol
 
+import "encoding/json"
+
 // Message is the top-level wrapper for all protocol messages
 type Message struct {
 	Type    string      `json:"type"`
@@ -142,7 +144,12 @@ type ServerStateMessage struct {
 	Controller *ControllerState `json:"controller,omitempty"`
 }
 
-// MetadataState contains track metadata per spec (for metadata role)
+// MetadataState contains track metadata per spec (for metadata role).
+//
+// The wire encoding is tristate: an omitted key means "unchanged, preserve
+// prior value", a JSON null means "explicitly clear", and a value means
+// "set". Receivers must distinguish all three to merge a diff_update onto a
+// running snapshot — see HasField.
 type MetadataState struct {
 	Timestamp   int64          `json:"timestamp"`              // Server clock µs when valid
 	Title       *string        `json:"title,omitempty"`        // Track title
@@ -155,6 +162,56 @@ type MetadataState struct {
 	Progress    *ProgressState `json:"progress,omitempty"`     // Playback progress
 	Repeat      *string        `json:"repeat,omitempty"`       // "off", "one", "all"
 	Shuffle     *bool          `json:"shuffle,omitempty"`      // Shuffle enabled
+
+	// presentKeys records which JSON keys appeared in the incoming message,
+	// so callers can distinguish "field omitted" (preserve prior value)
+	// from "field set to null" (clear prior value). Populated by
+	// UnmarshalJSON; nil for messages constructed in Go directly.
+	presentKeys map[string]struct{}
+}
+
+// HasField reports whether the named JSON key was present in the incoming
+// server/state message. The check is case-sensitive against the wire name
+// (e.g. "artwork_url", not "ArtworkURL"). Returns true for messages
+// constructed in-process via field assignment (not through UnmarshalJSON),
+// so backwards-compatible callers that build a MetadataState directly are
+// treated as if every assigned field were "present".
+func (m *MetadataState) HasField(jsonKey string) bool {
+	if m.presentKeys == nil {
+		return true
+	}
+	_, ok := m.presentKeys[jsonKey]
+	return ok
+}
+
+// UnmarshalJSON decodes a MetadataState while tracking which JSON keys
+// were present. Required to distinguish "omitted" (preserve prior value)
+// from "null" (clear prior value) per the Sendspin metadata diff-update
+// protocol — both decode to a nil pointer otherwise, which loses the
+// signal.
+func (m *MetadataState) UnmarshalJSON(data []byte) error {
+	// First pass: capture key presence.
+	var raw map[string]json.RawMessage
+	if err := json.Unmarshal(data, &raw); err != nil {
+		return err
+	}
+
+	// Second pass: decode known fields. The `type alias` indirection is the
+	// standard Go trick to avoid infinite recursion: json.Unmarshal on the
+	// alias bypasses our custom UnmarshalJSON because the alias type does
+	// not inherit methods.
+	type alias MetadataState
+	var a alias
+	if err := json.Unmarshal(data, &a); err != nil {
+		return err
+	}
+
+	*m = MetadataState(a)
+	m.presentKeys = make(map[string]struct{}, len(raw))
+	for k := range raw {
+		m.presentKeys[k] = struct{}{}
+	}
+	return nil
 }
 
 // ProgressState contains playback progress info per spec
