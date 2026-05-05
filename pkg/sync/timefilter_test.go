@@ -33,19 +33,19 @@ func TestTimeFilterConvergesOnStableOffset(t *testing.T) {
 		tf.Update(10000, 50, clientTime)
 	}
 
-	// Should converge close to 10000µs offset
+	// Should converge close to 10000µs offset.
+	// With canonical MaxErrorScale=0.5 (¼ measurement variance vs legacy 1.0),
+	// observed final offset error is 0 µs after 50 stable samples.
 	clientNow := int64(1000000 + 50*100000)
 	st := tf.ComputeServerTime(clientNow)
 	offset := st - clientNow
-	if abs64(offset-10000) > 100 {
+	if abs64(offset-10000) > 50 {
 		t.Errorf("expected offset near 10000, got %d", offset)
 	}
 }
 
 func TestTimeFilterDriftTracking(t *testing.T) {
-	cfg := DefaultTimeFilterConfig()
-	cfg.DriftProcessStdDev = 0.1 // allow drift model
-	tf := NewTimeFilter(cfg)
+	tf := NewTimeFilter(DefaultTimeFilterConfig())
 
 	// Simulate a clock drifting at 10µs per second (10ppm)
 	// Measurements taken 1s apart, offset increases by 10 each time
@@ -55,14 +55,16 @@ func TestTimeFilterDriftTracking(t *testing.T) {
 		tf.Update(trueOffset, 50, clientTime)
 	}
 
-	// Check that drift-compensated conversion is more accurate than offset-only
+	// Check that drift-compensated conversion is more accurate than offset-only.
+	// With canonical DriftProcessStdDev=1e-11, drift is tracked exactly on this
+	// noise-free synthetic input — observed extrapolation error is 0 µs.
 	futureClient := int64(250 * 1000000)                // 50s in the future
 	trueServerTime := futureClient + int64(5000+250*10) // true offset at t=250s
 	predicted := tf.ComputeServerTime(futureClient)
 
 	err := abs64(predicted - trueServerTime)
-	if err > 1000 { // within 1ms is reasonable for 50s extrapolation
-		t.Errorf("drift prediction error %dµs, expected <1000µs", err)
+	if err > 200 {
+		t.Errorf("drift prediction error %dµs, expected <200µs", err)
 	}
 }
 
@@ -85,10 +87,12 @@ func TestTimeFilterAdaptiveForgetting(t *testing.T) {
 		tf.Update(15000, 50, clientTime)
 	}
 
+	// With canonical ForgetFactor=2.0 / AdaptiveCutoff=3.0 the filter recovers
+	// from the +10000 µs jump within ~50 samples; observed final error is ~2 µs.
 	clientNow := int64(1000000 + 200*100000)
 	st := tf.ComputeServerTime(clientNow)
 	offset := st - clientNow
-	if abs64(offset-15000) > 1000 {
+	if abs64(offset-15000) > 200 {
 		t.Errorf("expected offset near 15000 after jump, got %d", offset)
 	}
 }
@@ -208,30 +212,28 @@ func TestTimeFilterInitialInfCovariance(t *testing.T) {
 }
 
 func TestTimeFilterMaxErrorScaleDefault(t *testing.T) {
-	if got := DefaultTimeFilterConfig().MaxErrorScale; got != 1.0 {
-		t.Errorf("expected MaxErrorScale default 1.0, got %v", got)
+	if got := DefaultTimeFilterConfig().MaxErrorScale; got != 0.5 {
+		t.Errorf("expected MaxErrorScale default 0.5, got %v", got)
 	}
 }
 
 func TestTimeFilterMaxErrorScaleConvergence(t *testing.T) {
-	cfgDefault := DefaultTimeFilterConfig()
-	cfgScaled := DefaultTimeFilterConfig()
-	cfgScaled.MaxErrorScale = 0.5
+	cfgDefault := DefaultTimeFilterConfig() // MaxErrorScale = 0.5
+	cfgTighter := DefaultTimeFilterConfig()
+	cfgTighter.MaxErrorScale = 0.25 // half of default
 
 	tfDefault := NewTimeFilter(cfgDefault)
-	tfScaled := NewTimeFilter(cfgScaled)
+	tfTighter := NewTimeFilter(cfgTighter)
 
 	for i := 0; i < 30; i++ {
 		clientTime := int64(1000000 + i*100000)
 		tfDefault.Update(5000, 50, clientTime)
-		tfScaled.Update(5000, 50, clientTime)
+		tfTighter.Update(5000, 50, clientTime)
 	}
 
-	errDefault := tfDefault.GetError()
-	errScaled := tfScaled.GetError()
-	if !(errScaled < errDefault) {
-		t.Errorf("expected scaled (0.5) error < default (1.0); got scaled=%d default=%d",
-			errScaled, errDefault)
+	if !(tfTighter.GetError() < tfDefault.GetError()) {
+		t.Errorf("expected tighter (0.25) error < default (0.5); got tighter=%d default=%d",
+			tfTighter.GetError(), tfDefault.GetError())
 	}
 }
 
@@ -252,5 +254,68 @@ func TestTimeFilterGetCovariance(t *testing.T) {
 	}
 	if cov >= 50000 {
 		t.Errorf("expected covariance < 50000 µs² after convergence, got %d", cov)
+	}
+}
+
+func TestTimeFilterRecoveryFromJump(t *testing.T) {
+	tf := NewTimeFilter(DefaultTimeFilterConfig())
+
+	// Build a stable estimate at offset=5000 over 150 samples.
+	var clientTime int64 = 1_000_000
+	for i := 0; i < 150; i++ {
+		tf.Update(5000, 50, clientTime)
+		clientTime += 100_000
+	}
+
+	// Server clock jumps +30 ms.
+	tf.Update(35_000, 50, clientTime)
+	clientTime += 100_000
+
+	// Within 30 more samples, error should be < 100 µs.
+	for i := 0; i < 30; i++ {
+		tf.Update(35_000, 50, clientTime)
+		clientTime += 100_000
+	}
+
+	st := tf.ComputeServerTime(clientTime)
+	offset := st - clientTime
+	if abs64(offset-35_000) > 100 {
+		t.Errorf("expected offset within 100µs of 35000 after recovery, got %d", offset)
+	}
+}
+
+func TestTimeFilterLongSoak(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping long soak in -short mode")
+	}
+
+	tf := NewTimeFilter(DefaultTimeFilterConfig())
+
+	// 60 minutes of measurements, 1 sample per second.
+	// Synthetic drift varies sinusoidally over the hour to simulate slow
+	// oscillator wander (peak 20 ppm = 20 µs/s).
+	const totalSeconds = 3600
+	var clientTime int64 = 1_000_000
+	var maxAbsError int64
+
+	for i := 0; i < totalSeconds; i++ {
+		// True drift in µs/s, sinusoid with 30-min period
+		truePpm := 20.0 * math.Sin(2*math.Pi*float64(i)/1800.0)
+		trueOffset := int64(5000 + float64(i)*truePpm)
+		tf.Update(trueOffset, 50, clientTime)
+
+		// Measure the offset error after each step.
+		st := tf.ComputeServerTime(clientTime)
+		e := abs64(st - clientTime - trueOffset)
+		if e > maxAbsError {
+			maxAbsError = e
+		}
+		clientTime += 1_000_000 // +1 second
+	}
+
+	// Bound: with 1e-11 drift process noise and 50 µs max_error, peak error
+	// should stay well under 5000 µs even with the changing drift.
+	if maxAbsError > 5000 {
+		t.Errorf("peak offset error during soak = %d µs, expected < 5000", maxAbsError)
 	}
 }
