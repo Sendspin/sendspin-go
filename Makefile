@@ -191,7 +191,6 @@ conformance:
 		echo "Cloning sendspin-cli (supplies the FLAC test fixture)..."; \
 		git clone --depth 1 https://github.com/Sendspin/sendspin-cli.git ../conformance/repos/sendspin-cli; \
 	fi
-	@ln -sfn "$(CURDIR)" ../conformance/repos/sendspin-go
 	@cd ../conformance && uv sync
 	@cd ../conformance && CONFORMANCE_REPO_SENDSPIN_GO="$(CURDIR)" uv run python scripts/run_all.py \
 		--from sendspin-go \
