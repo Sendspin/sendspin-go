@@ -27,6 +27,7 @@ type TimeFilter struct {
 	forgetVarianceFactor         float64
 	adaptiveForgettingCutoff     float64
 	driftSignificanceThresholdSq float64
+	maxErrorScale                float64
 
 	useDrift   bool
 	count      uint8
@@ -47,6 +48,8 @@ type TimeFilterConfig struct {
 	MinSamples uint8
 	// DriftSignificanceThreshold is the SNR threshold for applying drift compensation.
 	DriftSignificanceThreshold float64
+	// MaxErrorScale (0,1] scales max_error before use as the measurement std dev. Spec recommends 0.5.
+	MaxErrorScale float64
 }
 
 // DefaultTimeFilterConfig returns recommended values from the spec.
@@ -58,17 +61,23 @@ func DefaultTimeFilterConfig() TimeFilterConfig {
 		AdaptiveCutoff:             0.75,
 		MinSamples:                 100,
 		DriftSignificanceThreshold: 2.0,
+		MaxErrorScale:              1.0,
 	}
 }
 
 // NewTimeFilter creates a Kalman filter for time synchronization.
 func NewTimeFilter(cfg TimeFilterConfig) *TimeFilter {
+	maxErrorScale := cfg.MaxErrorScale
+	if maxErrorScale <= 0 {
+		maxErrorScale = 1.0 // avoid zero variance → div-by-zero in Kalman gain
+	}
 	tf := &TimeFilter{
 		processVariance:              cfg.ProcessStdDev * cfg.ProcessStdDev,
 		driftProcessVariance:         cfg.DriftProcessStdDev * cfg.DriftProcessStdDev,
 		forgetVarianceFactor:         cfg.ForgetFactor * cfg.ForgetFactor,
 		adaptiveForgettingCutoff:     cfg.AdaptiveCutoff,
 		driftSignificanceThresholdSq: cfg.DriftSignificanceThreshold * cfg.DriftSignificanceThreshold,
+		maxErrorScale:                maxErrorScale,
 		minSamples:                   cfg.MinSamples,
 	}
 	tf.reset()
@@ -92,7 +101,8 @@ func (tf *TimeFilter) Update(measurement, maxError, timeAdded int64) {
 	dtSq := dt * dt
 	tf.lastUpdate = timeAdded
 
-	measVar := float64(maxError) * float64(maxError)
+	updateStdDev := float64(maxError) * tf.maxErrorScale
+	measVar := updateStdDev * updateStdDev
 
 	// First measurement: establish offset baseline
 	if tf.count == 0 {
@@ -184,6 +194,17 @@ func (tf *TimeFilter) GetError() int64 {
 	tf.mu.Lock()
 	defer tf.mu.Unlock()
 	v := math.Sqrt(tf.offsetCovariance)
+	if math.IsInf(v, 0) || math.IsNaN(v) {
+		return math.MaxInt64
+	}
+	return int64(math.Round(v))
+}
+
+// GetCovariance returns the offset variance in µs². Returns MaxInt64 before any update.
+func (tf *TimeFilter) GetCovariance() int64 {
+	tf.mu.Lock()
+	defer tf.mu.Unlock()
+	v := tf.offsetCovariance
 	if math.IsInf(v, 0) || math.IsNaN(v) {
 		return math.MaxInt64
 	}

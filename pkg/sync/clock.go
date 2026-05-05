@@ -27,8 +27,13 @@ const (
 )
 
 func NewClockSync() *ClockSync {
+	return NewClockSyncWithConfig(DefaultTimeFilterConfig())
+}
+
+// NewClockSyncWithConfig creates a ClockSync with a custom filter configuration.
+func NewClockSyncWithConfig(cfg TimeFilterConfig) *ClockSync {
 	return &ClockSync{
-		filter:  NewTimeFilter(DefaultTimeFilterConfig()),
+		filter:  NewTimeFilter(cfg),
 		quality: QualityLost,
 	}
 }

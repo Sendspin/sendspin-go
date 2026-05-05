@@ -140,6 +140,31 @@ func TestClockSync_ServerMicrosNow(t *testing.T) {
 	}
 }
 
+func TestNewClockSyncWithConfig(t *testing.T) {
+	cfg := DefaultTimeFilterConfig()
+	cfg.MaxErrorScale = 0.25
+
+	csDefault := NewClockSync()
+	csScaled := NewClockSyncWithConfig(cfg)
+
+	const samples = 30
+	for i := 0; i < samples; i++ {
+		t1 := int64(1_000_000 + i*100_000)
+		t2 := int64(500_000 + i*100_000)
+		t3 := t2 + 100
+		t4 := t1 + 1000 // ~1ms RTT
+		csDefault.ProcessSyncResponse(t1, t2, t3, t4)
+		csScaled.ProcessSyncResponse(t1, t2, t3, t4)
+	}
+
+	errDefault := csDefault.filter.GetError()
+	errScaled := csScaled.filter.GetError()
+	if !(errScaled < errDefault) {
+		t.Errorf("expected scaled (0.25) error < default (1.0); got scaled=%d default=%d",
+			errScaled, errDefault)
+	}
+}
+
 func TestConcurrentAccess(t *testing.T) {
 	cs := NewClockSync()
 

@@ -206,3 +206,51 @@ func TestTimeFilterInitialInfCovariance(t *testing.T) {
 	}
 	tf.mu.Unlock()
 }
+
+func TestTimeFilterMaxErrorScaleDefault(t *testing.T) {
+	if got := DefaultTimeFilterConfig().MaxErrorScale; got != 1.0 {
+		t.Errorf("expected MaxErrorScale default 1.0, got %v", got)
+	}
+}
+
+func TestTimeFilterMaxErrorScaleConvergence(t *testing.T) {
+	cfgDefault := DefaultTimeFilterConfig()
+	cfgScaled := DefaultTimeFilterConfig()
+	cfgScaled.MaxErrorScale = 0.5
+
+	tfDefault := NewTimeFilter(cfgDefault)
+	tfScaled := NewTimeFilter(cfgScaled)
+
+	for i := 0; i < 30; i++ {
+		clientTime := int64(1000000 + i*100000)
+		tfDefault.Update(5000, 50, clientTime)
+		tfScaled.Update(5000, 50, clientTime)
+	}
+
+	errDefault := tfDefault.GetError()
+	errScaled := tfScaled.GetError()
+	if !(errScaled < errDefault) {
+		t.Errorf("expected scaled (0.5) error < default (1.0); got scaled=%d default=%d",
+			errScaled, errDefault)
+	}
+}
+
+func TestTimeFilterGetCovariance(t *testing.T) {
+	tf := NewTimeFilter(DefaultTimeFilterConfig())
+
+	if got := tf.GetCovariance(); got != math.MaxInt64 {
+		t.Errorf("expected MaxInt64 before any update, got %d", got)
+	}
+
+	for i := 0; i < 50; i++ {
+		tf.Update(5000, 20, int64(1000000+i*100000))
+	}
+
+	cov := tf.GetCovariance()
+	if cov <= 0 {
+		t.Errorf("expected positive covariance after convergence, got %d", cov)
+	}
+	if cov >= 50000 {
+		t.Errorf("expected covariance < 50000 µs² after convergence, got %d", cov)
+	}
+}
