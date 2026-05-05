@@ -207,17 +207,12 @@ func TestTimeFilterInitialInfCovariance(t *testing.T) {
 	tf.mu.Unlock()
 }
 
-// Phase A: MaxErrorScale must default to 1.0 so existing callers see
-// bit-identical measurement variance (max_error * 1.0)² == max_error².
 func TestTimeFilterMaxErrorScaleDefault(t *testing.T) {
 	if got := DefaultTimeFilterConfig().MaxErrorScale; got != 1.0 {
 		t.Errorf("expected MaxErrorScale default 1.0, got %v", got)
 	}
 }
 
-// Phase A: a smaller MaxErrorScale means lower measurement variance, so the
-// posterior offset covariance should be tighter after the same number of
-// identical measurements.
 func TestTimeFilterMaxErrorScaleConvergence(t *testing.T) {
 	cfgDefault := DefaultTimeFilterConfig()
 	cfgScaled := DefaultTimeFilterConfig()
@@ -240,9 +235,6 @@ func TestTimeFilterMaxErrorScaleConvergence(t *testing.T) {
 	}
 }
 
-// Phase A: GetCovariance mirrors upstream C++ get_covariance(). Initially
-// covariance is +Inf (clamped to MaxInt64); after convergence it shrinks
-// to a small positive value in µs².
 func TestTimeFilterGetCovariance(t *testing.T) {
 	tf := NewTimeFilter(DefaultTimeFilterConfig())
 

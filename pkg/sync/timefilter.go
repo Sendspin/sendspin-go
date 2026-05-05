@@ -48,12 +48,7 @@ type TimeFilterConfig struct {
 	MinSamples uint8
 	// DriftSignificanceThreshold is the SNR threshold for applying drift compensation.
 	DriftSignificanceThreshold float64
-	// MaxErrorScale (0,1] is multiplied by max_error before it is used as the
-	// measurement standard deviation. Because max_error is a worst-case
-	// round-trip half-delay rather than a 1σ estimate, scaling it down avoids
-	// inflating measurement variance and slowing convergence. The Sendspin
-	// time-filter spec recommends 0.5; this Go implementation defaults to 1.0
-	// for backward compatibility — see Phase B for the planned default flip.
+	// MaxErrorScale (0,1] scales max_error before use as the measurement std dev. Spec recommends 0.5.
 	MaxErrorScale float64
 }
 
@@ -72,12 +67,9 @@ func DefaultTimeFilterConfig() TimeFilterConfig {
 
 // NewTimeFilter creates a Kalman filter for time synchronization.
 func NewTimeFilter(cfg TimeFilterConfig) *TimeFilter {
-	// Defensive: a non-positive scale would zero out measurement variance and
-	// trip a divide-by-zero in the Kalman gain (1.0 / (cov + measVar)).
-	// Clamp to the backward-compatible default.
 	maxErrorScale := cfg.MaxErrorScale
 	if maxErrorScale <= 0 {
-		maxErrorScale = 1.0
+		maxErrorScale = 1.0 // avoid zero variance → div-by-zero in Kalman gain
 	}
 	tf := &TimeFilter{
 		processVariance:              cfg.ProcessStdDev * cfg.ProcessStdDev,
@@ -109,7 +101,6 @@ func (tf *TimeFilter) Update(measurement, maxError, timeAdded int64) {
 	dtSq := dt * dt
 	tf.lastUpdate = timeAdded
 
-	// Mirrors upstream C++ naming: update_std_dev = max_error * max_error_scale_.
 	updateStdDev := float64(maxError) * tf.maxErrorScale
 	measVar := updateStdDev * updateStdDev
 
@@ -209,9 +200,7 @@ func (tf *TimeFilter) GetError() int64 {
 	return int64(math.Round(v))
 }
 
-// GetCovariance returns the offset variance in µs². Mirrors the upstream
-// C++ get_covariance() helper. Inf/NaN are clamped to MaxInt64 to match
-// GetError's defensive behavior.
+// GetCovariance returns the offset variance in µs². Returns MaxInt64 before any update.
 func (tf *TimeFilter) GetCovariance() int64 {
 	tf.mu.Lock()
 	defer tf.mu.Unlock()

@@ -140,9 +140,6 @@ func TestClockSync_ServerMicrosNow(t *testing.T) {
 	}
 }
 
-// Phase A: a custom TimeFilterConfig must propagate through to the inner
-// filter. Drive both ClockSyncs with the same RTT shape so the RTT-discard
-// and quality thresholds don't differ; the only variable is MaxErrorScale.
 func TestNewClockSyncWithConfig(t *testing.T) {
 	cfg := DefaultTimeFilterConfig()
 	cfg.MaxErrorScale = 0.25
@@ -155,7 +152,7 @@ func TestNewClockSyncWithConfig(t *testing.T) {
 		t1 := int64(1_000_000 + i*100_000)
 		t2 := int64(500_000 + i*100_000)
 		t3 := t2 + 100
-		t4 := t1 + 1000 // 1ms RTT-ish, well below the 50ms QualityGood threshold
+		t4 := t1 + 1000 // ~1ms RTT
 		csDefault.ProcessSyncResponse(t1, t2, t3, t4)
 		csScaled.ProcessSyncResponse(t1, t2, t3, t4)
 	}
