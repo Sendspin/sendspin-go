@@ -25,6 +25,18 @@ type MessageHandler interface {
 	HandleMessage(c *ServerClient, payload json.RawMessage) error
 }
 
+// PlaybackStateChangedHandler is an optional interface that a GroupRole
+// may implement to receive notifications when the group's playback state
+// transitions. The Group dispatches GroupPlaybackStateChangedEvent to
+// roles that implement this interface; same-state writes are not
+// dispatched (Group.SetPlaybackState filters them out).
+//
+// Note: oldState may be empty for the very first transition out of the
+// zero value.
+type PlaybackStateChangedHandler interface {
+	OnPlaybackStateChanged(oldState, newState string)
+}
+
 // RegisterRole registers a GroupRole with this group. The role is
 // stored by its Role() family name. Duplicate registrations for the
 // same family overwrite the previous one.
@@ -40,6 +52,14 @@ func (g *Group) RegisterRole(role GroupRole) {
 		g.roles = make(map[string]GroupRole)
 	}
 	g.roles[role.Role()] = role
+
+	// Optional attach-to-group hook: roles that need to iterate the
+	// group's clients on broadcast (e.g. MetadataGroupRole) implement
+	// the unexported attachToGroup method to receive a back-reference.
+	// Kept unexported so callers can't bypass RegisterRole.
+	if a, ok := role.(interface{ attachToGroup(*Group) }); ok {
+		a.attachToGroup(g)
+	}
 
 	if g.roleDispatchStarted {
 		return
@@ -101,6 +121,12 @@ func (g *Group) dispatchRoleEvents(events <-chan Event) {
 		case ClientLeftEvent:
 			for _, r := range roles {
 				r.OnClientLeave(e.ClientID, e.ClientName)
+			}
+		case GroupPlaybackStateChangedEvent:
+			for _, r := range roles {
+				if h, ok := r.(PlaybackStateChangedHandler); ok {
+					h.OnPlaybackStateChanged(e.OldState, e.NewState)
+				}
 			}
 		default:
 			// ClientStateChangedEvent and future event types are
