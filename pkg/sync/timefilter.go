@@ -52,16 +52,17 @@ type TimeFilterConfig struct {
 	MaxErrorScale float64
 }
 
-// DefaultTimeFilterConfig returns recommended values from the spec.
+// DefaultTimeFilterConfig returns the canonical defaults from the upstream
+// Sendspin/time-filter reference (PR #6, 2026-04-27).
 func DefaultTimeFilterConfig() TimeFilterConfig {
 	return TimeFilterConfig{
-		ProcessStdDev:              0.01,
-		DriftProcessStdDev:         0.0,
-		ForgetFactor:               1.001,
-		AdaptiveCutoff:             0.75,
+		ProcessStdDev:              0.0,
+		DriftProcessStdDev:         1e-11,
+		ForgetFactor:               2.0,
+		AdaptiveCutoff:             3.0,
 		MinSamples:                 100,
 		DriftSignificanceThreshold: 2.0,
-		MaxErrorScale:              1.0,
+		MaxErrorScale:              0.5,
 	}
 }
 
