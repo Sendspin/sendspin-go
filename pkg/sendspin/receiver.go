@@ -8,7 +8,9 @@ import (
 	"fmt"
 	"log"
 	"math"
+	"sort"
 	"strings"
+	stdsync "sync"
 	"time"
 
 	"github.com/Sendspin/sendspin-go/pkg/audio"
@@ -26,6 +28,12 @@ const (
 	timeSyncBurstInterval   = 10 * time.Second
 	timeSyncResponseTimeout = 500 * time.Millisecond
 )
+
+// metadataApplyTickInterval is the cadence at which metadataApplyLoop wakes
+// to drain pending updates whose server timestamp has elapsed. 100 ms is
+// imperceptible for metadata display lag; do not shorten without a real
+// reason.
+const metadataApplyTickInterval = 100 * time.Millisecond
 
 type ReceiverConfig struct {
 	ServerAddr     string
@@ -48,10 +56,17 @@ type ReceiverConfig struct {
 	ClientID       string
 	DeviceInfo     DeviceInfo
 	DecoderFactory func(audio.Format) (decode.Decoder, error)
-	OnMetadata     func(Metadata)
-	OnStreamStart  func(audio.Format)
-	OnStreamEnd    func()
-	OnError        func(error)
+	// OnMetadata is invoked after each server metadata update is merged
+	// onto the running snapshot. It may be called from either the
+	// server-state reader goroutine (immediate updates) or the metadata
+	// apply-loop goroutine (timestamp-deferred updates), and is invoked
+	// while an internal mutex is held — callbacks must not block on
+	// other Receiver methods. Implementations should serialize their
+	// own state if needed.
+	OnMetadata    func(Metadata)
+	OnStreamStart func(audio.Format)
+	OnStreamEnd   func()
+	OnError       func(error)
 }
 
 type ReceiverStats struct {
@@ -79,6 +94,18 @@ type Receiver struct {
 	schedulerCancel context.CancelFunc
 	serverAddr      string
 	connected       bool
+
+	// Metadata merge state. mergedMetadata is the running snapshot fed to
+	// OnMetadata; pendingMetadata holds future-dated updates sorted by
+	// ascending Timestamp until clockNow() crosses each one.
+	metadataMu      stdsync.Mutex
+	mergedMetadata  Metadata
+	pendingMetadata []*protocol.MetadataState
+
+	// clockNow returns "current server time in microseconds". Indirected
+	// from r.clockSync.ServerMicrosNow so tests can drive the
+	// timestamp-deferral path with a fake clock.
+	clockNow func() int64
 }
 
 // NewReceiver creates a new Receiver with the given configuration.
@@ -116,6 +143,7 @@ func NewReceiver(config ReceiverConfig) (*Receiver, error) {
 		cancel:     cancel,
 		serverAddr: config.ServerAddr,
 	}
+	r.clockNow = r.clockSync.ServerMicrosNow
 
 	return r, nil
 }
@@ -214,6 +242,7 @@ func (r *Receiver) Connect() error {
 	go r.handleAudioChunks()
 	go r.handleServerState()
 	go r.handleGroupUpdates()
+	go r.metadataApplyLoop()
 
 	return nil
 }
@@ -374,26 +403,155 @@ func (r *Receiver) handleStreamEnd() {
 	}
 }
 
+// handleServerState reads server/state messages from the protocol client
+// and feeds metadata updates into the merge layer. Non-metadata fields
+// of ServerStateMessage are not used today; if/when they grow handlers
+// they should branch off here.
 func (r *Receiver) handleServerState() {
 	for {
 		select {
 		case state := <-r.client.ServerState:
-			if state.Metadata != nil && r.config.OnMetadata != nil {
-				meta := state.Metadata
-				r.config.OnMetadata(Metadata{
-					Title:       derefString(meta.Title),
-					Artist:      derefString(meta.Artist),
-					Album:       derefString(meta.Album),
-					AlbumArtist: derefString(meta.AlbumArtist),
-					ArtworkURL:  derefString(meta.ArtworkURL),
-					Track:       derefInt(meta.Track),
-					Year:        derefInt(meta.Year),
-					Duration:    getDurationSeconds(meta.Progress),
-				})
+			if state.Metadata != nil {
+				r.enqueueMetadata(state.Metadata)
 			}
 		case <-r.ctx.Done():
 			return
 		}
+	}
+}
+
+// enqueueMetadata accepts a server metadata update and either applies it
+// immediately (timestamp <= current server time, or zero timestamp) or
+// queues it for future application sorted by ascending timestamp.
+//
+// Zero / negative timestamps apply immediately. Per spec, MetadataState
+// always carries a timestamp, but defending against malformed servers
+// costs nothing and keeps existing snapshot-style emitters working.
+func (r *Receiver) enqueueMetadata(m *protocol.MetadataState) {
+	r.metadataMu.Lock()
+	defer r.metadataMu.Unlock()
+
+	serverNow := r.clockNow()
+
+	if m.Timestamp <= 0 || m.Timestamp <= serverNow {
+		r.applyMetadataLocked(m)
+		return
+	}
+
+	// Insertion-sort into pendingMetadata by ascending Timestamp.
+	idx := sort.Search(len(r.pendingMetadata), func(i int) bool {
+		return r.pendingMetadata[i].Timestamp >= m.Timestamp
+	})
+	r.pendingMetadata = append(r.pendingMetadata, nil)
+	copy(r.pendingMetadata[idx+1:], r.pendingMetadata[idx:])
+	r.pendingMetadata[idx] = m
+}
+
+// applyMetadataLocked merges the update onto mergedMetadata per tristate
+// rules and fires OnMetadata. Caller must hold r.metadataMu.
+//
+// For each field: if the wire key was absent, preserve the prior value;
+// if present and null (pointer is nil after decode), reset to zero; if
+// present with a value, replace. The progress field is atomic per spec —
+// a non-null progress always carries all three fields, so we either take
+// TrackDuration or zero Duration.
+func (r *Receiver) applyMetadataLocked(m *protocol.MetadataState) {
+	if m.HasField("title") {
+		if m.Title != nil {
+			r.mergedMetadata.Title = *m.Title
+		} else {
+			r.mergedMetadata.Title = ""
+		}
+	}
+	if m.HasField("artist") {
+		if m.Artist != nil {
+			r.mergedMetadata.Artist = *m.Artist
+		} else {
+			r.mergedMetadata.Artist = ""
+		}
+	}
+	if m.HasField("album") {
+		if m.Album != nil {
+			r.mergedMetadata.Album = *m.Album
+		} else {
+			r.mergedMetadata.Album = ""
+		}
+	}
+	if m.HasField("album_artist") {
+		if m.AlbumArtist != nil {
+			r.mergedMetadata.AlbumArtist = *m.AlbumArtist
+		} else {
+			r.mergedMetadata.AlbumArtist = ""
+		}
+	}
+	if m.HasField("artwork_url") {
+		if m.ArtworkURL != nil {
+			r.mergedMetadata.ArtworkURL = *m.ArtworkURL
+		} else {
+			r.mergedMetadata.ArtworkURL = ""
+		}
+	}
+	if m.HasField("track") {
+		if m.Track != nil {
+			r.mergedMetadata.Track = *m.Track
+		} else {
+			r.mergedMetadata.Track = 0
+		}
+	}
+	if m.HasField("year") {
+		if m.Year != nil {
+			r.mergedMetadata.Year = *m.Year
+		} else {
+			r.mergedMetadata.Year = 0
+		}
+	}
+	if m.HasField("progress") {
+		if m.Progress != nil {
+			r.mergedMetadata.Duration = m.Progress.TrackDuration / 1000
+		} else {
+			r.mergedMetadata.Duration = 0
+		}
+	}
+
+	snapshot := r.mergedMetadata
+	if r.config.OnMetadata != nil {
+		r.config.OnMetadata(snapshot)
+	}
+}
+
+// metadataApplyLoop drains pendingMetadata as server time crosses each
+// queued update's timestamp. Started as a goroutine in Connect.
+func (r *Receiver) metadataApplyLoop() {
+	ticker := time.NewTicker(metadataApplyTickInterval)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ticker.C:
+			r.drainPendingMetadata()
+		case <-r.ctx.Done():
+			return
+		}
+	}
+}
+
+// drainPendingMetadata applies every pending update whose timestamp has
+// elapsed, in ascending timestamp order. Pending is kept sorted by
+// enqueueMetadata, so we can stop at the first future-dated entry.
+func (r *Receiver) drainPendingMetadata() {
+	r.metadataMu.Lock()
+	defer r.metadataMu.Unlock()
+
+	serverNow := r.clockNow()
+	applied := 0
+	for _, m := range r.pendingMetadata {
+		if m.Timestamp > serverNow {
+			break
+		}
+		r.applyMetadataLocked(m)
+		applied++
+	}
+	if applied > 0 {
+		r.pendingMetadata = r.pendingMetadata[applied:]
 	}
 }
 
