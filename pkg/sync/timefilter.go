@@ -48,7 +48,8 @@ type TimeFilterConfig struct {
 	MinSamples uint8
 	// DriftSignificanceThreshold is the SNR threshold for applying drift compensation.
 	DriftSignificanceThreshold float64
-	// MaxErrorScale (0,1] scales max_error before use as the measurement std dev. Spec recommends 0.5.
+	// MaxErrorScale scales max_error before use as the measurement std dev.
+	// Spec recommends 0.5; values <1 indicate max_error overestimates noise.
 	MaxErrorScale float64
 }
 
