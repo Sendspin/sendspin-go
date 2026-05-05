@@ -7,6 +7,7 @@ import (
 	"encoding/base64"
 	"fmt"
 	"log"
+	"math"
 	"strings"
 	"time"
 
@@ -14,6 +15,16 @@ import (
 	"github.com/Sendspin/sendspin-go/pkg/audio/decode"
 	"github.com/Sendspin/sendspin-go/pkg/protocol"
 	"github.com/Sendspin/sendspin-go/pkg/sync"
+)
+
+// Time-sync burst parameters. Mirrors sendspin-cpp's TimeBurst defaults and
+// the upstream Sendspin/time-filter README "Recommended Usage" guidance: a
+// short burst of NTP-style exchanges, each waiting for its reply, with the
+// best (lowest RTT) sample fed to the filter once per burst.
+const (
+	timeSyncBurstSize       = 8
+	timeSyncBurstInterval   = 10 * time.Second
+	timeSyncResponseTimeout = 500 * time.Millisecond
 )
 
 type ReceiverConfig struct {
@@ -420,59 +431,93 @@ func (r *Receiver) watchConnection() {
 	}
 }
 
-// performInitialSync does multiple sync rounds before audio starts.
+// performInitialSync drives a single immediate burst so the filter has
+// multiple samples before the audio scheduler starts.
 func (r *Receiver) performInitialSync() error {
-	log.Printf("Performing initial clock synchronization...")
-
-	for i := 0; i < 5; i++ {
-		t1 := time.Now().UnixMicro()
-		r.client.SendTimeSync(t1)
-
-		select {
-		case resp := <-r.client.TimeSyncResp:
-			t4 := time.Now().UnixMicro()
-			r.clockSync.ProcessSyncResponse(resp.ClientTransmitted, resp.ServerReceived, resp.ServerTransmitted, t4)
-		case <-time.After(500 * time.Millisecond):
-			log.Printf("Initial sync round %d timeout", i+1)
-		}
-
-		time.Sleep(100 * time.Millisecond)
-	}
+	log.Printf("Performing initial clock synchronization (burst of %d)...", timeSyncBurstSize)
+	r.runTimeSyncBurst(timeSyncBurstSize)
 
 	rtt, quality := r.clockSync.GetStats()
 	log.Printf("Initial clock sync complete: rtt=%dus, quality=%v", rtt, quality)
-
 	return nil
 }
 
+// clockSyncLoop fires a time-sync burst every timeSyncBurstInterval. The old
+// per-second single-message pattern was replaced by the burst-best strategy
+// recommended by the upstream Sendspin/time-filter README and implemented by
+// sendspin-cpp's TimeBurst — it converges faster and rejects high-RTT
+// outliers without an explicit threshold.
 func (r *Receiver) clockSyncLoop() {
-	ticker := time.NewTicker(1 * time.Second)
+	ticker := time.NewTicker(timeSyncBurstInterval)
 	defer ticker.Stop()
 
 	for {
 		select {
 		case <-ticker.C:
-			for {
-				select {
-				case <-r.client.TimeSyncResp:
-					log.Printf("Discarded stale time sync response")
-				default:
-					goto sendRequest
-				}
-			}
-
-		sendRequest:
-			t1 := time.Now().UnixMicro()
-			r.client.SendTimeSync(t1)
-
-		case resp := <-r.client.TimeSyncResp:
-			t4 := time.Now().UnixMicro()
-			r.clockSync.ProcessSyncResponse(resp.ClientTransmitted, resp.ServerReceived, resp.ServerTransmitted, t4)
-
+			r.runTimeSyncBurst(timeSyncBurstSize)
 		case <-r.ctx.Done():
 			return
 		}
 	}
+}
+
+// runTimeSyncBurst sends `size` time messages back-to-back, each waiting for
+// its reply, tracks the sample with the lowest RTT, and feeds only that best
+// sample to the clock-sync filter at burst end. Mirrors sendspin-cpp's
+// TimeBurst loop. Strictly serial — bursts run on TCP/WebSocket where a
+// delayed earlier message also delays its successors, so parallel sends
+// would not give independent RTT measurements.
+func (r *Receiver) runTimeSyncBurst(size int) {
+	// Drain any responses left over from a prior burst (e.g. a timed-out
+	// reply that arrived after the per-message timeout fired). Keeps the
+	// next-message recv from picking up a stale sample.
+drainLoop:
+	for {
+		select {
+		case <-r.client.TimeSyncResp:
+		default:
+			break drainLoop
+		}
+	}
+
+	var (
+		bestT1, bestT2, bestT3, bestT4 int64
+		bestRTT                        int64 = math.MaxInt64
+		valid                                = 0
+	)
+
+	for i := 0; i < size; i++ {
+		t1 := time.Now().UnixMicro()
+		if err := r.client.SendTimeSync(t1); err != nil {
+			log.Printf("Burst send %d/%d failed: %v", i+1, size, err)
+			continue
+		}
+
+		select {
+		case resp := <-r.client.TimeSyncResp:
+			t4 := time.Now().UnixMicro()
+			rtt := (t4 - resp.ClientTransmitted) - (resp.ServerTransmitted - resp.ServerReceived)
+			if rtt < bestRTT {
+				bestRTT = rtt
+				bestT1 = resp.ClientTransmitted
+				bestT2 = resp.ServerReceived
+				bestT3 = resp.ServerTransmitted
+				bestT4 = t4
+			}
+			valid++
+		case <-time.After(timeSyncResponseTimeout):
+			log.Printf("Burst sample %d/%d timed out", i+1, size)
+		case <-r.ctx.Done():
+			return
+		}
+	}
+
+	if valid == 0 {
+		log.Printf("Burst produced 0 valid samples; filter not updated")
+		return
+	}
+
+	r.clockSync.ProcessSyncResponse(bestT1, bestT2, bestT3, bestT4)
 }
 
 // buildSupportedFormats returns the player's advertised format list,

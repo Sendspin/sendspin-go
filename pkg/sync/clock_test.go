@@ -30,16 +30,21 @@ func TestSyncEstablishment(t *testing.T) {
 		t.Error("expected not synced initially")
 	}
 
-	now := time.Now().UnixMicro()
-	cs.ProcessSyncResponse(now-10000, 1000000, 1000100, now)
+	// One low-noise sample is enough to mark the filter Synced.
+	cs.ProcessSyncResponse(1_000_000, 500_000, 500_100, 1_000_200)
 
 	if !cs.filter.Synced() {
 		t.Error("expected synced after first response")
 	}
 
+	// Drive enough low-noise samples to converge to QualityGood.
+	for i := 1; i < 60; i++ {
+		t1 := int64(1_000_000 + i*100_000)
+		cs.ProcessSyncResponse(t1, t1+50, t1+150, t1+200) // ~200µs RTT
+	}
 	_, quality := cs.GetStats()
 	if quality != QualityGood {
-		t.Errorf("expected QualityGood, got %v", quality)
+		t.Errorf("expected QualityGood after convergence, got %v", quality)
 	}
 }
 
@@ -71,25 +76,33 @@ func TestServerToLocalTimeConversion(t *testing.T) {
 func TestQualityTracking(t *testing.T) {
 	cs := NewClockSync()
 
-	// Good quality: RTT < 50ms
+	// Single noisy sample → high σ → not yet QualityGood.
 	cs.ProcessSyncResponse(1000000, 1000, 1100, 1025000)
 	_, quality := cs.GetStats()
-	if quality != QualityGood {
-		t.Errorf("expected QualityGood for 25ms RTT, got %v", quality)
+	if quality == QualityGood {
+		t.Errorf("expected non-Good quality on first sample, got %v", quality)
 	}
 
-	// Degraded quality: RTT > 50ms
-	cs.ProcessSyncResponse(2000000, 2000, 2100, 2080000)
+	// Drive enough low-noise samples to converge below the QualityGood threshold.
+	for i := 1; i < 60; i++ {
+		t1 := int64(1_000_000 + i*100_000)
+		cs.ProcessSyncResponse(t1, t1+50, t1+150, t1+200) // ~200µs RTT
+	}
 	_, quality = cs.GetStats()
-	if quality != QualityDegraded {
-		t.Errorf("expected QualityDegraded for 80ms RTT, got %v", quality)
+	if quality != QualityGood {
+		t.Errorf("expected QualityGood after convergence, got %v (filter err=%d)",
+			quality, cs.filter.GetError())
 	}
 }
 
 func TestQualityDegradation(t *testing.T) {
 	cs := NewClockSync()
 
-	cs.ProcessSyncResponse(1000000, 1000, 1100, 1025000)
+	// Drive enough low-noise samples to reach QualityGood.
+	for i := 0; i < 60; i++ {
+		t1 := int64(1_000_000 + i*100_000)
+		cs.ProcessSyncResponse(t1, t1+50, t1+150, t1+200) // ~200µs RTT
+	}
 
 	quality := cs.CheckQuality()
 	if quality != QualityGood {
@@ -103,22 +116,6 @@ func TestQualityDegradation(t *testing.T) {
 	quality = cs.CheckQuality()
 	if quality != QualityLost {
 		t.Errorf("expected QualityLost after 6s, got %v", quality)
-	}
-}
-
-func TestHighRTTRejection(t *testing.T) {
-	cs := NewClockSync()
-
-	// First sync with good RTT
-	cs.ProcessSyncResponse(1000000, 1000, 1100, 1025000)
-	count1 := cs.sampleCount
-
-	// Second sync with very high RTT (>100ms) should be discarded
-	cs.ProcessSyncResponse(2000000, 2000, 2100, 2250000)
-	count2 := cs.sampleCount
-
-	if count2 != count1 {
-		t.Errorf("expected sample count to stay at %d, got %d", count1, count2)
 	}
 }
 
