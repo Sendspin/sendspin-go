@@ -23,6 +23,25 @@ func TestPlayer_RequestFormatNotConnected(t *testing.T) {
 	}
 }
 
+// TestPlayer_ExternalSourceNotConnected guards #123: the external-source
+// API surface must fail cleanly (not panic) when there is no connection.
+func TestPlayer_ExternalSourceNotConnected(t *testing.T) {
+	player, err := NewPlayer(PlayerConfig{
+		ServerAddr: "localhost:8927",
+		PlayerName: "Test Player",
+	})
+	if err != nil {
+		t.Fatalf("NewPlayer: %v", err)
+	}
+
+	if err := player.EnterExternalSource(); err == nil {
+		t.Error("EnterExternalSource on a disconnected player should error")
+	}
+	if err := player.ExitExternalSource(); err == nil {
+		t.Error("ExitExternalSource on a disconnected player should error")
+	}
+}
+
 func TestNewPlayer_Defaults(t *testing.T) {
 	player, err := NewPlayer(PlayerConfig{
 		ServerAddr: "localhost:8927",

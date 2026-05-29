@@ -91,7 +91,7 @@ type ClientStateMessage struct {
 
 // PlayerState reports the player's current state per spec
 type PlayerState struct {
-	State  string `json:"state"`            // "synchronized" or "error"
+	State  string `json:"state"`            // "synchronized", "error", or "external_source"
 	Volume int    `json:"volume,omitempty"` // 0-100, if volume command supported
 	Muted  bool   `json:"muted,omitempty"`  // if mute command supported
 }
