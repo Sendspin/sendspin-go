@@ -163,3 +163,28 @@ func TestClientDialerBackoffOnFailure(t *testing.T) {
 	cancel()
 	<-done
 }
+
+// TestClientDialerRetryOnRestart guards #117: a connection that ends with a
+// "restart" goodbye (surfaced as errRetryRequested) frees the instance slot
+// for re-dial, whereas a clean disconnect latches it.
+func TestClientDialerRetryOnRestart(t *testing.T) {
+	d := newClientDialer(make(chan *discovery.ClientInfo), func(context.Context, *discovery.ClientInfo) error { return nil })
+
+	const clean = "clean._sendspin._tcp.local."
+	if !d.claim(clean) {
+		t.Fatal("first claim of clean instance should succeed")
+	}
+	d.release(clean, nil)
+	if d.claim(clean) {
+		t.Error("instance should stay latched after a clean disconnect (no re-dial)")
+	}
+
+	const restart = "restart._sendspin._tcp.local."
+	if !d.claim(restart) {
+		t.Fatal("first claim of restart instance should succeed")
+	}
+	d.release(restart, errRetryRequested)
+	if !d.claim(restart) {
+		t.Error("instance should be re-claimable after a restart goodbye")
+	}
+}

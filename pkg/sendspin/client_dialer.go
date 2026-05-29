@@ -5,6 +5,7 @@ package sendspin
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log"
 	"strings"
@@ -25,10 +26,18 @@ func clientInfoURL(info *discovery.ClientInfo) string {
 	return fmt.Sprintf("ws://%s:%d%s", info.Host, info.Port, path)
 }
 
+// errRetryRequested signals that a dialed connection completed normally but the
+// client asked to be re-dialed (it sent a "restart" goodbye). It is distinct
+// from a nil result (which latches the instance, never re-dialing) and from a
+// real dial error (which backs off).
+var errRetryRequested = errors.New("client requested re-dial (restart)")
+
 // dialAndHandle opens a WebSocket to a discovered client and hands the
-// connection to the provided handler. The handler is expected to block
-// until the connection is fully drained (e.g. handleConnection).
-func dialAndHandle(ctx context.Context, info *discovery.ClientInfo, handle func(*websocket.Conn)) error {
+// connection to the provided handler. The handler is expected to block until
+// the connection is fully drained (e.g. handleConnection) and to return whether
+// the client asked to be re-dialed. A true result is reported as
+// errRetryRequested so the dialer frees the slot for re-dial.
+func dialAndHandle(ctx context.Context, info *discovery.ClientInfo, handle func(*websocket.Conn) bool) error {
 	url := clientInfoURL(info)
 	dialer := websocket.Dialer{HandshakeTimeout: 10 * time.Second}
 
@@ -37,7 +46,9 @@ func dialAndHandle(ctx context.Context, info *discovery.ClientInfo, handle func(
 		return fmt.Errorf("dial %s: %w", url, err)
 	}
 	log.Printf("Dialed discovered client %s at %s", info.Name, url)
-	handle(conn)
+	if handle(conn) {
+		return errRetryRequested
+	}
 	return nil
 }
 
@@ -127,9 +138,11 @@ func (d *clientDialer) claim(instance string) bool {
 
 // release updates the instance slot after a dial attempt completes.
 // On success (dialErr == nil) the instance stays latched in the active
-// set — we never re-dial a successfully-connected instance. On error
-// it frees the slot and schedules an exponentially-backed-off cooldown
-// before the next retry.
+// set — we never re-dial a successfully-connected instance. When the client
+// asked to be re-dialed (errRetryRequested, a "restart" goodbye) the slot is
+// freed immediately with no cooldown so the next discovery event re-dials. On
+// any other error it frees the slot and schedules an exponentially-backed-off
+// cooldown before the next retry.
 func (d *clientDialer) release(instance string, dialErr error) {
 	d.mu.Lock()
 	defer d.mu.Unlock()
@@ -139,6 +152,16 @@ func (d *clientDialer) release(instance string, dialErr error) {
 		// events for this instance are silently ignored. The server
 		// already handled the connection; re-dialing would create a
 		// duplicate session.
+		delete(d.failures, instance)
+		delete(d.cooldown, instance)
+		return
+	}
+
+	if errors.Is(dialErr, errRetryRequested) {
+		// Client said "restart": it intends to return. Free the slot and
+		// clear any failure/cooldown so the next discovery event re-dials
+		// promptly rather than latching it out.
+		delete(d.active, instance)
 		delete(d.failures, instance)
 		delete(d.cooldown, instance)
 		return
