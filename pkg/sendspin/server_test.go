@@ -509,6 +509,100 @@ func TestServer_GroupReceivesEventsFromRealHandshake(t *testing.T) {
 	}
 }
 
+// TestServer_ExternalSourceStateEndToEnd guards #123: a client/state with
+// state "external_source" (exactly what Player.EnterExternalSource sends)
+// flows through the real handshake and surfaces as a ClientStateChangedEvent
+// the server can act on.
+func TestServer_ExternalSourceStateEndToEnd(t *testing.T) {
+	server, err := NewServer(ServerConfig{
+		Port:   0,
+		Name:   "External Source Test",
+		Source: NewTestTone(48000, 2),
+	})
+	if err != nil {
+		t.Fatalf("NewServer: %v", err)
+	}
+
+	events, unsubscribe := server.Group().Subscribe()
+	defer unsubscribe()
+
+	errChan := make(chan error, 1)
+	go func() { errChan <- server.Start() }()
+	defer func() {
+		server.Stop()
+		select {
+		case <-errChan:
+		case <-time.After(5 * time.Second):
+			t.Error("server did not stop within timeout")
+		}
+	}()
+
+	port := waitForServerPort(t, server)
+	time.Sleep(200 * time.Millisecond)
+
+	conn, _, err := websocket.DefaultDialer.Dial(fmt.Sprintf("ws://localhost:%d/sendspin", port), nil)
+	if err != nil {
+		t.Fatalf("dial: %v", err)
+	}
+	defer conn.Close()
+
+	hello := protocol.Message{
+		Type: "client/hello",
+		Payload: protocol.ClientHello{
+			ClientID:       "external-source-client",
+			Name:           "External Source Client",
+			Version:        1,
+			SupportedRoles: []string{"player@v1"},
+			PlayerV1Support: &protocol.PlayerV1Support{
+				SupportedFormats: []protocol.AudioFormat{
+					{Codec: "pcm", Channels: 2, SampleRate: 48000, BitDepth: 24},
+				},
+				BufferCapacity: 1048576,
+			},
+		},
+	}
+	if err := conn.WriteJSON(hello); err != nil {
+		t.Fatalf("write hello: %v", err)
+	}
+
+	// Drain the join event first.
+	select {
+	case evt := <-events:
+		if _, ok := evt.(ClientJoinedEvent); !ok {
+			t.Fatalf("first event = %T, want ClientJoinedEvent", evt)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("timed out waiting for ClientJoinedEvent")
+	}
+
+	// Send the external_source state exactly as Player.EnterExternalSource does.
+	stateMsg := protocol.Message{
+		Type: "client/state",
+		Payload: protocol.ClientStateMessage{
+			Player: &protocol.PlayerState{State: "external_source"},
+		},
+	}
+	if err := conn.WriteJSON(stateMsg); err != nil {
+		t.Fatalf("write client/state: %v", err)
+	}
+
+	// Expect the matching ClientStateChangedEvent (ignoring unrelated events).
+	deadline := time.After(2 * time.Second)
+	for {
+		select {
+		case evt := <-events:
+			if sc, ok := evt.(ClientStateChangedEvent); ok {
+				if sc.State != "external_source" {
+					t.Errorf("ClientStateChangedEvent.State = %q, want %q", sc.State, "external_source")
+				}
+				return
+			}
+		case <-deadline:
+			t.Fatal("timed out waiting for ClientStateChangedEvent(external_source)")
+		}
+	}
+}
+
 // TestServer_ControllerCommandEndToEnd exercises the full client/command
 // pipeline: Server + ControllerGroupRole + real WebSocket handshake +
 // client/command message → OnCommand callback fires.
