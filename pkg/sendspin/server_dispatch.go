@@ -9,6 +9,11 @@ import (
 	"github.com/Sendspin/sendspin-go/pkg/protocol"
 )
 
+// goodbyeReasonRestart is the client/goodbye reason that, per spec, means the
+// client intends to reconnect. Only this reason warrants re-dialing a
+// server-dialed client; "shutdown", "another_server", and "user_request" do not.
+const goodbyeReasonRestart = "restart"
+
 func (s *Server) handleClientMessage(c *ServerClient, data []byte) {
 	var msg protocol.Message
 	if err := json.Unmarshal(data, &msg); err != nil {
@@ -127,5 +132,11 @@ func (s *Server) handleClientGoodbye(c *ServerClient, payload interface{}) {
 	}
 
 	log.Printf("Client %s goodbye: %s", c.name, goodbye.Reason)
+
+	// Record the reason so handleConnection can decide, once the connection
+	// closes, whether a server-dialed client should be re-dialed. Per spec
+	// only "restart" implies the client will return; "shutdown",
+	// "another_server", and "user_request" do not.
+	c.setGoodbyeReason(goodbye.Reason)
 	// Connection close happens in handleConnection's read loop once this returns.
 }

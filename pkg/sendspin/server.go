@@ -344,7 +344,11 @@ func (s *Server) handleWebSocket(w http.ResponseWriter, r *http.Request) {
 	s.handleConnection(conn)
 }
 
-func (s *Server) handleConnection(conn *websocket.Conn) {
+// handleConnection serves one client connection until it closes. The returned
+// retry flag is true only when the client left with a "restart" goodbye,
+// signalling that a server-dialed client should be re-dialed; it is ignored
+// for client-initiated connections.
+func (s *Server) handleConnection(conn *websocket.Conn) (retry bool) {
 	defer conn.Close()
 	conn.SetReadLimit(1 << 20) // 1MB
 
@@ -461,6 +465,11 @@ func (s *Server) handleConnection(conn *websocket.Conn) {
 
 		s.handleClientMessage(c, data)
 	}
+
+	// Once the connection has closed, a "restart" goodbye means the client
+	// intends to return — signal the dialer to re-dial. Any other reason (or
+	// none) leaves retry false so the client stays latched / not re-dialed.
+	return c.GoodbyeReason() == goodbyeReasonRestart
 }
 
 func (s *Server) clientWriter(c *ServerClient) {
