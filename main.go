@@ -186,6 +186,13 @@ func main() {
 		log.Fatalf("client_id: %v", err)
 	}
 
+	// Persist a static delay supplied on the CLI so it survives restarts and
+	// need not be re-supplied on every launch (per spec). Mirrors client_id
+	// persistence. Values already present in the config are left untouched.
+	if setByUser["static-delay-ms"] {
+		persistStaticDelay(*staticDelayMs, cfg, loadedConfigPath)
+	}
+
 	config := sendspin.PlayerConfig{
 		ServerAddr:     serverAddress,
 		PlayerName:     playerName,
@@ -400,6 +407,34 @@ func resolveClientID(override string, cfg *sendspin.PlayerConfigFile, loadedConf
 	}
 
 	return sendspin.ResolveClientID(override, fromConfig, persist)
+}
+
+// persistStaticDelay writes a CLI-supplied static delay back to the player
+// config so it survives restarts. Best-effort: failures are logged, not fatal.
+func persistStaticDelay(value int, cfg *sendspin.PlayerConfigFile, loadedConfigPath string) {
+	persistPath := loadedConfigPath
+	if persistPath == "" {
+		p, err := sendspin.DefaultPlayerConfigPath()
+		if err != nil {
+			log.Printf("static_delay_ms: no config path available for persistence: %v", err)
+			return
+		}
+		persistPath = p
+	}
+
+	var current *int
+	if cfg != nil {
+		current = cfg.StaticDelayMs
+	}
+
+	wrote, err := sendspin.PersistStaticDelay(persistPath, current, value)
+	if err != nil {
+		log.Printf("static_delay_ms: failed to persist: %v", err)
+		return
+	}
+	if wrote {
+		log.Printf("static_delay_ms: persisted %d to %s", value, persistPath)
+	}
 }
 
 func statsUpdateLoop(player *sendspin.Player, updateTUI func(ui.StatusMsg)) {

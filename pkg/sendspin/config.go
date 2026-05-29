@@ -223,6 +223,20 @@ func (c *PlayerConfigFile) AsStringMap() map[string]string {
 // existing keys are preserved via yaml.Node round-tripping. Used to persist
 // the auto-generated client_id and the --client-id override.
 func WriteStringKey(path, key, value string) error {
+	return writeScalarKey(path, key, value, "!!str")
+}
+
+// WriteIntKey is like WriteStringKey but writes an integer scalar, for numeric
+// config fields (e.g. static_delay_ms) that load into int. A string scalar
+// would fail to unmarshal back into the typed config.
+func WriteIntKey(path, key string, value int) error {
+	return writeScalarKey(path, key, strconv.Itoa(value), "!!int")
+}
+
+// writeScalarKey reads the YAML at path (if any), sets the given top-level key
+// to a scalar carrying valueTag, and atomically writes the result back.
+// Comments and existing keys are preserved via yaml.Node round-tripping.
+func writeScalarKey(path, key, value, valueTag string) error {
 	var root yaml.Node
 
 	if data, err := os.ReadFile(path); err == nil {
@@ -235,13 +249,28 @@ func WriteStringKey(path, key, value string) error {
 
 	mapping := topLevelMapping(&root)
 
-	setOrAppendStringKey(mapping, key, value)
+	setOrAppendScalarKey(mapping, key, value, valueTag)
 
 	buf, err := yaml.Marshal(&root)
 	if err != nil {
 		return fmt.Errorf("marshal config: %w", err)
 	}
 	return atomicWriteFile(path, buf)
+}
+
+// PersistStaticDelay writes static_delay_ms to the YAML config at path so the
+// value survives restarts and the embedder need not re-supply it on every
+// connect (per spec). It is a no-op when current already equals value, so a
+// launch that merely reuses the persisted value doesn't rewrite the file.
+// Returns whether a write occurred.
+func PersistStaticDelay(path string, current *int, value int) (bool, error) {
+	if current != nil && *current == value {
+		return false, nil
+	}
+	if err := WriteIntKey(path, "static_delay_ms", value); err != nil {
+		return false, err
+	}
+	return true, nil
 }
 
 // topLevelMapping returns the mapping node that backs the top of a YAML
@@ -256,14 +285,15 @@ func topLevelMapping(root *yaml.Node) *yaml.Node {
 	return mapping
 }
 
-// setOrAppendStringKey updates the value for key in a MappingNode, or appends
-// a new key/value pair if the key is not present. Leaves all other entries
-// (and their comments) untouched.
-func setOrAppendStringKey(mapping *yaml.Node, key, value string) {
+// setOrAppendScalarKey updates the value for key in a MappingNode, or appends
+// a new key/value pair if the key is not present. The value node carries
+// valueTag (e.g. "!!str" or "!!int"); the key is always a string. Leaves all
+// other entries (and their comments) untouched.
+func setOrAppendScalarKey(mapping *yaml.Node, key, value, valueTag string) {
 	for i := 0; i+1 < len(mapping.Content); i += 2 {
 		if mapping.Content[i].Value == key {
 			mapping.Content[i+1].Kind = yaml.ScalarNode
-			mapping.Content[i+1].Tag = "!!str"
+			mapping.Content[i+1].Tag = valueTag
 			mapping.Content[i+1].Value = value
 			mapping.Content[i+1].Style = 0
 			return
@@ -271,7 +301,7 @@ func setOrAppendStringKey(mapping *yaml.Node, key, value string) {
 	}
 	mapping.Content = append(mapping.Content,
 		&yaml.Node{Kind: yaml.ScalarNode, Tag: "!!str", Value: key},
-		&yaml.Node{Kind: yaml.ScalarNode, Tag: "!!str", Value: value},
+		&yaml.Node{Kind: yaml.ScalarNode, Tag: valueTag, Value: value},
 	)
 }
 
