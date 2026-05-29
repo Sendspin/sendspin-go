@@ -538,6 +538,31 @@ func (p *Player) SendCommand(command string) error {
 	return p.receiver.client.Send("client/command", payload)
 }
 
+// FormatRequest describes a stream/request-format ask. Any zero-valued field is
+// omitted, asking the server to keep the current value for it.
+type FormatRequest struct {
+	Codec      string // "pcm", "opus", "flac"
+	Channels   int
+	SampleRate int
+	BitDepth   int
+}
+
+// RequestFormat asks the server to switch the player stream to a different
+// format — for example dropping to a lower bitrate codec under network or CPU
+// pressure. The server responds by starting a new stream in the chosen format.
+// Returns an error if not connected.
+func (p *Player) RequestFormat(req FormatRequest) error {
+	if p.receiver == nil || p.receiver.client == nil {
+		return fmt.Errorf("not connected")
+	}
+	return p.receiver.client.SendRequestFormat(protocol.RequestFormatPlayer{
+		Codec:      req.Codec,
+		Channels:   req.Channels,
+		SampleRate: req.SampleRate,
+		BitDepth:   req.BitDepth,
+	})
+}
+
 func (p *Player) sendState() error {
 	if p.receiver == nil || p.receiver.client == nil {
 		return nil

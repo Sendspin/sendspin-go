@@ -608,6 +608,20 @@ func (c *Client) SendGoodbye(reason string) error {
 	return c.sendJSON(msg)
 }
 
+// SendRequestFormat sends a stream/request-format message asking the server to
+// switch the player stream to a different codec/format. Zero-valued fields are
+// omitted, asking the server to keep the current value. The server responds
+// with a new stream/start.
+func (c *Client) SendRequestFormat(player RequestFormatPlayer) error {
+	msg := Message{
+		Type: "stream/request-format",
+		Payload: StreamRequestFormat{
+			Player: &player,
+		},
+	}
+	return c.sendJSON(msg)
+}
+
 func (c *Client) SendTimeSync(t1 int64) error {
 	msg := Message{
 		Type: "client/time",
