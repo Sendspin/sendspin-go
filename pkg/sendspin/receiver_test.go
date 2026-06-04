@@ -349,6 +349,86 @@ func newMetadataReceiver(t *testing.T, fakeNow int64, mc *metadataCapture) *Rece
 	return r
 }
 
+// TestReceiver_ControllerStateAppliesRepeatShuffle verifies the canonical
+// path: controller server/state (spec#81) drives the merged snapshot's
+// Repeat/Shuffle. Controller state is a full snapshot with no timestamp,
+// so it applies immediately.
+func TestReceiver_ControllerStateAppliesRepeatShuffle(t *testing.T) {
+	mc := &metadataCapture{}
+	r := newMetadataReceiver(t, 0, mc)
+
+	r.applyController(&protocol.ControllerState{Repeat: "all", Shuffle: true})
+
+	got, ok := mc.latest()
+	if !ok {
+		t.Fatal("OnMetadata was not invoked for controller state")
+	}
+	if got.Repeat != "all" {
+		t.Errorf("Repeat = %q, want %q", got.Repeat, "all")
+	}
+	if !got.Shuffle {
+		t.Error("Shuffle = false, want true")
+	}
+}
+
+// TestReceiver_ControllerStatePreservesTrackMetadata confirms a controller
+// update does not clobber previously-merged track fields (title etc.) — it
+// only touches Repeat/Shuffle.
+func TestReceiver_ControllerStatePreservesTrackMetadata(t *testing.T) {
+	mc := &metadataCapture{}
+	r := newMetadataReceiver(t, 0, mc)
+
+	r.enqueueMetadata(metadataStateWithKeys(t, map[string]any{
+		"timestamp": 0,
+		"title":     "Song A",
+		"artist":    "Artist X",
+	}))
+	r.applyController(&protocol.ControllerState{Repeat: "one", Shuffle: false})
+
+	got, _ := mc.latest()
+	if got.Title != "Song A" || got.Artist != "Artist X" {
+		t.Errorf("track metadata clobbered by controller update: %+v", got)
+	}
+	if got.Repeat != "one" {
+		t.Errorf("Repeat = %q, want %q", got.Repeat, "one")
+	}
+}
+
+// TestReceiver_MetadataLegacyRepeatShuffle verifies the back-compat path: a
+// v1 server that still carries repeat/shuffle on the metadata state is honored
+// via the same tristate merge as every other metadata field.
+func TestReceiver_MetadataLegacyRepeatShuffle(t *testing.T) {
+	mc := &metadataCapture{}
+	r := newMetadataReceiver(t, 0, mc)
+
+	r.enqueueMetadata(metadataStateWithKeys(t, map[string]any{
+		"timestamp": 0,
+		"repeat":    "one",
+		"shuffle":   true,
+	}))
+
+	got, ok := mc.latest()
+	if !ok {
+		t.Fatal("OnMetadata was not invoked")
+	}
+	if got.Repeat != "one" {
+		t.Errorf("Repeat = %q, want %q", got.Repeat, "one")
+	}
+	if !got.Shuffle {
+		t.Error("Shuffle = false, want true")
+	}
+
+	// A later diff that omits repeat/shuffle must preserve them.
+	r.enqueueMetadata(metadataStateWithKeys(t, map[string]any{
+		"timestamp": 0,
+		"title":     "Song B",
+	}))
+	got, _ = mc.latest()
+	if got.Repeat != "one" || !got.Shuffle {
+		t.Errorf("omitted repeat/shuffle not preserved across diff: %+v", got)
+	}
+}
+
 // TestReceiver_MetadataMergePreservesUnchangedFields is the headline
 // regression: a track A snapshot followed by a track B diff_update that
 // only carries `title` must not blank out artist/album. Pre-fix, the

@@ -124,7 +124,9 @@ type Metadata struct {
 	ArtworkURL  string
 	Track       int
 	Year        int
-	Duration    int // seconds
+	Duration    int    // seconds
+	Repeat      string // "off", "one", "all" (from controller state per spec#81)
+	Shuffle     bool   // shuffle enabled (from controller state per spec#81)
 }
 
 type PlayerState struct {
