@@ -68,3 +68,32 @@ func TestScheduler_StaticDelayDefaultZero(t *testing.T) {
 		t.Errorf("staticDelay with 0 arg = %v, want 0", sched.staticDelay)
 	}
 }
+
+// TestScheduler_StaticDelayClamped verifies that static_delay_ms values outside
+// the spec range 0–5000 are clamped rather than applied verbatim, so a bad
+// server value or local config cannot push playback arbitrarily out of sync.
+func TestScheduler_StaticDelayClamped(t *testing.T) {
+	cases := []struct {
+		name   string
+		in     int
+		wantMs int
+	}{
+		{"negative clamps to zero", -100, 0},
+		{"above max clamps to 5000", 9000, maxStaticDelayMs},
+		{"at max is unchanged", maxStaticDelayMs, maxStaticDelayMs},
+		{"in range is unchanged", 250, 250},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			cs := sync.NewClockSync()
+			sched := NewScheduler(cs, 200, tc.in)
+			defer sched.Stop()
+
+			want := time.Duration(tc.wantMs) * time.Millisecond
+			if sched.staticDelay != want {
+				t.Errorf("staticDelay = %v, want %v", sched.staticDelay, want)
+			}
+		})
+	}
+}

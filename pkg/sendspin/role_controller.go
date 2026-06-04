@@ -66,10 +66,10 @@ func NewControllerRole(config ControllerConfig) *ControllerGroupRole {
 
 func (r *ControllerGroupRole) Role() string { return "controller" }
 
-// setGroup wires the owning Group into the role so state changes can be
-// broadcast to members. Called by Group.RegisterRole; the unexported name
-// keeps the injection internal to the package.
-func (r *ControllerGroupRole) setGroup(g *Group) {
+// attachToGroup wires the owning Group into the role so state changes can
+// be broadcast to members. Called by Group.RegisterRole via the unexported
+// attach-to-group hook; the unexported name keeps the injection internal.
+func (r *ControllerGroupRole) attachToGroup(g *Group) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	r.group = g

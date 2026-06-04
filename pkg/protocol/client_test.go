@@ -497,6 +497,115 @@ func TestClientSend_WritesEnvelope(t *testing.T) {
 	}
 }
 
+// TestClient_DetectsHalfOpenConnection verifies that the client tears down
+// (Done() fires) when the server stops responding to WebSocket control
+// pings. Without the heartbeat fix, ReadMessage blocks forever after a
+// silently-dropped connection (NAT timeout, idle eviction, missed RST) and
+// Done() never closes — the symptom Chris saw in the field as "Burst sample
+// N/8 timed out" with no reconnect.
+//
+// The fake server completes the Sendspin handshake and then installs a
+// no-op PingHandler so the client's pings are read but never elicit a Pong.
+// The client's pongWait deadline expires, ReadMessage errors out, Close
+// runs from readMessages's defer, and Done() fires.
+func TestClient_DetectsHalfOpenConnection(t *testing.T) {
+	// Override the package-level heartbeat vars to test-friendly values
+	// so the test wallclock budget is well under a second. Restore via
+	// t.Cleanup so other tests in this binary keep production timings.
+	savedPingPeriod, savedPongWait, savedWriteWait := pingPeriod, pongWait, writeWait
+	pingPeriod = 50 * time.Millisecond
+	pongWait = 250 * time.Millisecond
+	writeWait = 100 * time.Millisecond
+	t.Cleanup(func() {
+		pingPeriod = savedPingPeriod
+		pongWait = savedPongWait
+		writeWait = savedWriteWait
+	})
+
+	upgrader := websocket.Upgrader{CheckOrigin: func(*http.Request) bool { return true }}
+	serverDone := make(chan struct{})
+	handler := func(w http.ResponseWriter, r *http.Request) {
+		defer close(serverDone)
+		conn, err := upgrader.Upgrade(w, r, nil)
+		if err != nil {
+			t.Errorf("upgrade: %v", err)
+			return
+		}
+		defer conn.Close()
+
+		// Override the default PingHandler so the server does NOT auto-pong.
+		// This is the half-open simulation: pings arrive but no pong reply
+		// goes back. Returning nil keeps ReadMessage from surfacing an error,
+		// so the server happily reads forever while the client's read deadline
+		// counts down on the other side.
+		conn.SetPingHandler(func(string) error { return nil })
+
+		// Sendspin handshake: client/hello → server/hello → client/state.
+		if _, _, err := conn.ReadMessage(); err != nil {
+			t.Errorf("read client/hello: %v", err)
+			return
+		}
+		if err := conn.WriteJSON(Message{
+			Type:    "server/hello",
+			Payload: ServerHello{ServerID: "srv", Name: "srv", Version: 1},
+		}); err != nil {
+			t.Errorf("write server/hello: %v", err)
+			return
+		}
+		if _, _, err := conn.ReadMessage(); err != nil {
+			t.Errorf("read client/state: %v", err)
+			return
+		}
+
+		// Drain any further frames (the client's pings) until the connection
+		// errors out from the client side. We don't pong, so the client's
+		// read deadline will fire and it will close the socket.
+		for {
+			if _, _, err := conn.ReadMessage(); err != nil {
+				return
+			}
+		}
+	}
+
+	server := httptest.NewServer(http.HandlerFunc(handler))
+	defer server.Close()
+
+	wsURL := "ws" + strings.TrimPrefix(server.URL, "http")
+	conn, _, err := websocket.DefaultDialer.Dial(wsURL, nil)
+	if err != nil {
+		t.Fatalf("dial: %v", err)
+	}
+
+	client := NewClientFromConn(Config{
+		ClientID:       "half-open-test",
+		Name:           "Half Open Test",
+		Version:        1,
+		SupportedRoles: []string{"controller@v1"},
+	}, conn)
+	defer client.Close()
+
+	if err := client.Start(); err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+
+	// pongWait + slack. If Done() doesn't fire, the heartbeat is broken.
+	select {
+	case <-client.Done():
+	case <-time.After(750 * time.Millisecond):
+		t.Fatal("Done() did not fire within pongWait + slack; half-open connection went undetected")
+	}
+
+	// Idempotent shutdown: calling Close again must not panic.
+	client.Close()
+
+	// Let the server goroutine unwind so the test doesn't leak it.
+	select {
+	case <-serverDone:
+	case <-time.After(500 * time.Millisecond):
+		t.Log("server handler did not unwind in time (not fatal; client side already verified)")
+	}
+}
+
 // TestHandshake_PlayerSupportGatedByRoles is a regression test for a real
 // bug caught by the conformance harness against aiosendspin. The Go
 // library used to emit player@v1_support in every client/hello regardless

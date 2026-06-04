@@ -540,6 +540,64 @@ func (p *Player) SendCommand(command string) error {
 	return p.receiver.client.Send("client/command", payload)
 }
 
+// FormatRequest describes a stream/request-format ask. Any zero-valued field is
+// omitted, asking the server to keep the current value for it.
+type FormatRequest struct {
+	Codec      string // "pcm", "opus", "flac"
+	Channels   int
+	SampleRate int
+	BitDepth   int
+}
+
+// RequestFormat asks the server to switch the player stream to a different
+// format — for example dropping to a lower bitrate codec under network or CPU
+// pressure. The server responds by starting a new stream in the chosen format.
+// Returns an error if not connected.
+func (p *Player) RequestFormat(req FormatRequest) error {
+	if p.receiver == nil || p.receiver.client == nil {
+		return fmt.Errorf("not connected")
+	}
+	return p.receiver.client.SendRequestFormat(protocol.RequestFormatPlayer{
+		Codec:      req.Codec,
+		Channels:   req.Channels,
+		SampleRate: req.SampleRate,
+		BitDepth:   req.BitDepth,
+	})
+}
+
+// EnterExternalSource announces that this player is now driven by an external
+// system and is not participating in Sendspin playback, by sending client/state
+// with state "external_source". A conformant server moves the client to a solo
+// stopped group and ends its active streams (stream/end); the embedder owns
+// whatever local audio the external source produces. Call ExitExternalSource to
+// rejoin normal playback.
+func (p *Player) EnterExternalSource() error {
+	if p.receiver == nil || p.receiver.client == nil {
+		return fmt.Errorf("not connected")
+	}
+	if err := p.receiver.client.SendState(protocol.PlayerState{State: "external_source"}); err != nil {
+		return err
+	}
+	p.state.State = "external_source"
+	p.notifyStateChange()
+	return nil
+}
+
+// ExitExternalSource leaves external-source mode and rejoins normal Sendspin
+// playback by re-sending the synchronized client/state. A conformant server
+// returns the client to its previous group and resumes streaming.
+func (p *Player) ExitExternalSource() error {
+	if p.receiver == nil || p.receiver.client == nil {
+		return fmt.Errorf("not connected")
+	}
+	if err := p.sendState(); err != nil {
+		return err
+	}
+	p.state.State = "idle"
+	p.notifyStateChange()
+	return nil
+}
+
 func (p *Player) sendState() error {
 	if p.receiver == nil || p.receiver.client == nil {
 		return nil

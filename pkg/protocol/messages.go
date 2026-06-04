@@ -91,7 +91,7 @@ type ClientStateMessage struct {
 
 // PlayerState reports the player's current state per spec
 type PlayerState struct {
-	State  string `json:"state"`            // "synchronized" or "error"
+	State  string `json:"state"`            // "synchronized", "error", or "external_source"
 	Volume int    `json:"volume,omitempty"` // 0-100, if volume command supported
 	Muted  bool   `json:"muted,omitempty"`  // if mute command supported
 }
@@ -250,6 +250,23 @@ type StreamClear struct {
 // StreamEnd ends streams for specified roles
 type StreamEnd struct {
 	Roles []string `json:"roles,omitempty"` // Roles to end (omit = all)
+}
+
+// RequestFormatPlayer carries the player-role fields of a stream/request-format
+// message. All fields are optional per spec; an omitted (zero) field asks the
+// server to keep the current value for it.
+type RequestFormatPlayer struct {
+	Codec      string `json:"codec,omitempty"`
+	Channels   int    `json:"channels,omitempty"`
+	SampleRate int    `json:"sample_rate,omitempty"`
+	BitDepth   int    `json:"bit_depth,omitempty"`
+}
+
+// StreamRequestFormat is the client → server payload for stream/request-format,
+// used by clients to adapt the stream to changing network or CPU conditions.
+// The server responds with a new stream/start.
+type StreamRequestFormat struct {
+	Player *RequestFormatPlayer `json:"player,omitempty"`
 }
 
 // ClientGoodbye is sent before graceful disconnect

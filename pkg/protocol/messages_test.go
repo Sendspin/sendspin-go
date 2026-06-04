@@ -4,6 +4,7 @@ package protocol
 
 import (
 	"encoding/json"
+	"strings"
 	"testing"
 )
 
@@ -43,6 +44,53 @@ func TestControllerState_RepeatShuffleRoundTrip(t *testing.T) {
 	}
 	if got.Shuffle != true {
 		t.Errorf("Shuffle = %v, want true", got.Shuffle)
+	}
+}
+
+func TestStreamRequestFormatMarshaling(t *testing.T) {
+	// A full request round-trips with all player fields present.
+	msg := Message{
+		Type: "stream/request-format",
+		Payload: StreamRequestFormat{
+			Player: &RequestFormatPlayer{
+				Codec:      "opus",
+				Channels:   2,
+				SampleRate: 48000,
+				BitDepth:   16,
+			},
+		},
+	}
+	data, err := json.Marshal(msg)
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	got := string(data)
+	for _, want := range []string{
+		`"type":"stream/request-format"`,
+		`"player"`,
+		`"codec":"opus"`,
+		`"sample_rate":48000`,
+		`"bit_depth":16`,
+		`"channels":2`,
+	} {
+		if !strings.Contains(got, want) {
+			t.Errorf("marshaled message missing %q\n got: %s", want, got)
+		}
+	}
+
+	// A partial request omits zero-valued fields (server keeps current value).
+	partial, err := json.Marshal(StreamRequestFormat{Player: &RequestFormatPlayer{Codec: "pcm"}})
+	if err != nil {
+		t.Fatalf("marshal partial: %v", err)
+	}
+	ps := string(partial)
+	if !strings.Contains(ps, `"codec":"pcm"`) {
+		t.Errorf("partial request missing codec: %s", ps)
+	}
+	for _, omitted := range []string{"sample_rate", "bit_depth", "channels"} {
+		if strings.Contains(ps, omitted) {
+			t.Errorf("partial request should omit zero-valued %q, got: %s", omitted, ps)
+		}
 	}
 }
 

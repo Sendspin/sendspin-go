@@ -186,7 +186,7 @@ func TestControllerRole_SetRepeatBroadcastsToControllerMembers(t *testing.T) {
 	defer g.Close()
 
 	ctrl := NewControllerRole(ControllerConfig{SupportedCommands: []string{"repeat_all"}})
-	ctrl.setGroup(g)
+	ctrl.attachToGroup(g)
 
 	c1 := &ServerClient{id: "c1", roles: []string{"controller@v1"}, sendChan: make(chan interface{}, 10)}
 	c2 := &ServerClient{id: "c2", roles: []string{"controller@v1"}, sendChan: make(chan interface{}, 10)}
@@ -214,7 +214,7 @@ func TestControllerRole_SetRepeatDedup(t *testing.T) {
 	defer g.Close()
 
 	ctrl := NewControllerRole(ControllerConfig{})
-	ctrl.setGroup(g)
+	ctrl.attachToGroup(g)
 
 	c1 := &ServerClient{id: "c1", roles: []string{"controller@v1"}, sendChan: make(chan interface{}, 10)}
 	g.addClient(c1)
@@ -234,7 +234,7 @@ func TestControllerRole_SetShuffleBroadcasts(t *testing.T) {
 	defer g.Close()
 
 	ctrl := NewControllerRole(ControllerConfig{})
-	ctrl.setGroup(g)
+	ctrl.attachToGroup(g)
 
 	c1 := &ServerClient{id: "c1", roles: []string{"controller@v1"}, sendChan: make(chan interface{}, 10)}
 	g.addClient(c1)
@@ -259,7 +259,7 @@ func TestControllerRole_MirrorsToMetadataOnlyClient(t *testing.T) {
 	ctrl := NewControllerRole(ControllerConfig{
 		ClockMicros: func() int64 { return 12345 },
 	})
-	ctrl.setGroup(g)
+	ctrl.attachToGroup(g)
 
 	// Pure v1 client: metadata role only, no controller role.
 	md := &ServerClient{id: "m1", roles: []string{"metadata@v1"}, sendChan: make(chan interface{}, 10)}

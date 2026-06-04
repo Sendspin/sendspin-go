@@ -34,6 +34,8 @@ type ServerClient struct {
 	volume int
 	muted  bool
 
+	goodbyeReason string // reason from the last client/goodbye, if any
+
 	codec         string
 	opusEncoder   *server.OpusEncoder
 	flacEncoder   *server.FLACEncoder
@@ -131,6 +133,21 @@ func (c *ServerClient) Muted() bool {
 	c.mu.RLock()
 	defer c.mu.RUnlock()
 	return c.muted
+}
+
+// setGoodbyeReason records the reason from a client/goodbye message.
+func (c *ServerClient) setGoodbyeReason(reason string) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.goodbyeReason = reason
+}
+
+// GoodbyeReason returns the reason from the client's last client/goodbye, or
+// the empty string if none was received. Safe to call concurrently.
+func (c *ServerClient) GoodbyeReason() string {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+	return c.goodbyeReason
 }
 
 // Codec returns the currently-negotiated codec name ("pcm", "opus", "").

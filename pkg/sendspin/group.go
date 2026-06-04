@@ -65,6 +65,20 @@ type ClientStateChangedEvent struct {
 
 func (ClientStateChangedEvent) isGroupEvent() {}
 
+// GroupPlaybackStateChangedEvent fires when the group's playback state
+// transitions. Roles that need to react (e.g. re-broadcast metadata at
+// stopped→playing) listen via the optional PlaybackStateChangedHandler
+// interface dispatched by Group's role event loop.
+//
+// OldState may be empty for the initial transition out of the zero value.
+// Same-state transitions are not published (no-op writes are silent).
+type GroupPlaybackStateChangedEvent struct {
+	OldState string
+	NewState string
+}
+
+func (GroupPlaybackStateChangedEvent) isGroupEvent() {}
+
 // Group owns the event bus and the set of clients currently attached to
 // a playback group. For M2 there is exactly one Group per Server,
 // auto-created in NewServer. Multi-group support is a post-#61 concern.
@@ -267,10 +281,20 @@ func (g *Group) Close() {
 	clear(g.clients)
 }
 
-// SetPlaybackState updates the group's playback state. Future clients
-// joining the group will receive this state in group/update.
+// SetPlaybackState updates the group's playback state. If the new state
+// differs from the current value, a GroupPlaybackStateChangedEvent is
+// published. Future clients joining the group will receive the new
+// state in group/update. Same-state writes are a silent no-op.
 func (g *Group) SetPlaybackState(state string) {
 	g.mu.Lock()
 	defer g.mu.Unlock()
+	if g.playbackState == state {
+		return
+	}
+	oldState := g.playbackState
 	g.playbackState = state
+	g.publishLocked(GroupPlaybackStateChangedEvent{
+		OldState: oldState,
+		NewState: state,
+	})
 }

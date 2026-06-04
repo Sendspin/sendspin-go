@@ -14,6 +14,10 @@ import (
 	"github.com/Sendspin/sendspin-go/pkg/sync"
 )
 
+// maxStaticDelayMs is the upper bound the Sendspin spec defines for
+// static_delay_ms (integer, range 0–5000).
+const maxStaticDelayMs = 5000
+
 type Scheduler struct {
 	clockSync    *sync.ClockSync
 	bufferQ      *BufferQueue
@@ -41,8 +45,23 @@ type SchedulerStats struct {
 // bufferMs controls startup buffering (ms of audio to accumulate before playback).
 // staticDelayMs shifts every scheduled play time forward, compensating for
 // downstream hardware latency like Bluetooth sinks or AVRs. Zero means no shift.
+// Per the Sendspin spec static_delay_ms is an integer in the range 0–5000;
+// out-of-range values are clamped so a misbehaving server or bad local config
+// cannot push playback arbitrarily far out of sync.
 func NewScheduler(clockSync *sync.ClockSync, bufferMs int, staticDelayMs int) *Scheduler {
 	ctx, cancel := context.WithCancel(context.Background())
+
+	if staticDelayMs < 0 || staticDelayMs > maxStaticDelayMs {
+		clamped := staticDelayMs
+		if clamped < 0 {
+			clamped = 0
+		} else {
+			clamped = maxStaticDelayMs
+		}
+		log.Printf("static_delay_ms %d out of range [0,%d], clamping to %d",
+			staticDelayMs, maxStaticDelayMs, clamped)
+		staticDelayMs = clamped
+	}
 
 	// Calculate buffer target from user config (bufferMs / ChunkDurationMs)
 	bufferTarget := bufferMs / ChunkDurationMs

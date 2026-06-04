@@ -395,3 +395,70 @@ func TestWriteStringKey_AppendsKeyWhenAbsent(t *testing.T) {
 		t.Errorf("new key missing: client_id = %q", cfg.ClientID)
 	}
 }
+
+// TestPersistStaticDelay guards #122: static_delay_ms is persisted to YAML so
+// the embedder need not re-supply it across restarts.
+func TestPersistStaticDelay(t *testing.T) {
+	t.Run("writes when absent and round-trips", func(t *testing.T) {
+		path := filepath.Join(t.TempDir(), "player.yaml")
+
+		wrote, err := PersistStaticDelay(path, nil, 250)
+		if err != nil {
+			t.Fatalf("persist: %v", err)
+		}
+		if !wrote {
+			t.Error("expected a write when no value was persisted")
+		}
+
+		cfg, _, err := LoadPlayerConfig(path)
+		if err != nil {
+			t.Fatalf("load: %v", err)
+		}
+		if cfg.StaticDelayMs == nil || *cfg.StaticDelayMs != 250 {
+			t.Errorf("static_delay_ms = %v, want 250", cfg.StaticDelayMs)
+		}
+	})
+
+	t.Run("no-op when value unchanged", func(t *testing.T) {
+		path := filepath.Join(t.TempDir(), "player.yaml")
+		current := 250
+
+		wrote, err := PersistStaticDelay(path, &current, 250)
+		if err != nil {
+			t.Fatalf("persist: %v", err)
+		}
+		if wrote {
+			t.Error("expected no write when value is unchanged")
+		}
+		if _, err := os.Stat(path); !os.IsNotExist(err) {
+			t.Errorf("no-op should not create the file: %v", err)
+		}
+	})
+
+	t.Run("overwrites a differing value", func(t *testing.T) {
+		path := filepath.Join(t.TempDir(), "player.yaml")
+		if err := os.WriteFile(path, []byte("name: Den\nstatic_delay_ms: 100\n"), 0o600); err != nil {
+			t.Fatalf("seed: %v", err)
+		}
+		current := 100
+
+		wrote, err := PersistStaticDelay(path, &current, 500)
+		if err != nil {
+			t.Fatalf("persist: %v", err)
+		}
+		if !wrote {
+			t.Error("expected a write when the value differs")
+		}
+
+		cfg, _, err := LoadPlayerConfig(path)
+		if err != nil {
+			t.Fatalf("load: %v", err)
+		}
+		if cfg.StaticDelayMs == nil || *cfg.StaticDelayMs != 500 {
+			t.Errorf("static_delay_ms = %v, want 500", cfg.StaticDelayMs)
+		}
+		if cfg.Name != "Den" {
+			t.Errorf("unrelated key lost: name = %q", cfg.Name)
+		}
+	})
+}
