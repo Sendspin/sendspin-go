@@ -7,6 +7,45 @@ import (
 	"testing"
 )
 
+func TestControllerState_RepeatShuffleRoundTrip(t *testing.T) {
+	cs := ControllerState{
+		SupportedCommands: []string{"repeat_all", "shuffle"},
+		Volume:            50,
+		Muted:             false,
+		Repeat:            "all",
+		Shuffle:           true,
+	}
+
+	data, err := json.Marshal(cs)
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+
+	// repeat/shuffle are required controller-state fields per spec#81;
+	// they must always appear on the wire, even at zero value.
+	var raw map[string]json.RawMessage
+	if err := json.Unmarshal(data, &raw); err != nil {
+		t.Fatalf("unmarshal to map: %v", err)
+	}
+	if _, ok := raw["repeat"]; !ok {
+		t.Errorf("marshaled controller state missing 'repeat' key: %s", data)
+	}
+	if _, ok := raw["shuffle"]; !ok {
+		t.Errorf("marshaled controller state missing 'shuffle' key: %s", data)
+	}
+
+	var got ControllerState
+	if err := json.Unmarshal(data, &got); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if got.Repeat != "all" {
+		t.Errorf("Repeat = %q, want %q", got.Repeat, "all")
+	}
+	if got.Shuffle != true {
+		t.Errorf("Shuffle = %v, want true", got.Shuffle)
+	}
+}
+
 func TestClientHelloMarshaling(t *testing.T) {
 	hello := ClientHello{
 		ClientID:       "test-id",

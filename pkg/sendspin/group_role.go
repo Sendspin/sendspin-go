@@ -25,6 +25,14 @@ type MessageHandler interface {
 	HandleMessage(c *ServerClient, payload json.RawMessage) error
 }
 
+// groupAware is an optional interface a GroupRole may implement to
+// receive a reference to its owning Group at registration time. Roles
+// that need to broadcast to all members (rather than only greet joining
+// clients) implement this. Unexported so the injection stays internal.
+type groupAware interface {
+	setGroup(g *Group)
+}
+
 // RegisterRole registers a GroupRole with this group. The role is
 // stored by its Role() family name. Duplicate registrations for the
 // same family overwrite the previous one.
@@ -40,6 +48,11 @@ func (g *Group) RegisterRole(role GroupRole) {
 		g.roles = make(map[string]GroupRole)
 	}
 	g.roles[role.Role()] = role
+
+	// Inject the owning group into roles that broadcast to members.
+	if ga, ok := role.(groupAware); ok {
+		ga.setGroup(g)
+	}
 
 	if g.roleDispatchStarted {
 		return

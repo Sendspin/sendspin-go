@@ -221,11 +221,18 @@ type ProgressState struct {
 	PlaybackSpeed int `json:"playback_speed"` // Speed * 1000 (1000 = normal, 0 = paused)
 }
 
-// ControllerState contains controller state per spec
+// ControllerState contains controller state per spec.
+//
+// repeat and shuffle live here (not on MetadataState) as of spec#81:
+// they describe how playback behaves, alongside volume and mute. The
+// legacy MetadataState.Repeat/Shuffle fields are retained for
+// backward compatibility with v1 clients that read them from metadata.
 type ControllerState struct {
 	SupportedCommands []string `json:"supported_commands"`
-	Volume            int      `json:"volume"` // Group volume 0-100
-	Muted             bool     `json:"muted"`  // Group mute state
+	Volume            int      `json:"volume"`  // Group volume 0-100
+	Muted             bool     `json:"muted"`   // Group mute state
+	Repeat            string   `json:"repeat"`  // "off", "one", "all"
+	Shuffle           bool     `json:"shuffle"` // Shuffle enabled
 }
 
 // GroupUpdate is sent as group/update per spec
