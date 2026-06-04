@@ -90,10 +90,18 @@ type Receiver struct {
 	output          chan audio.Buffer
 	ctx             context.Context
 	cancel          context.CancelFunc
-	schedulerCtx    context.Context
 	schedulerCancel context.CancelFunc
 	serverAddr      string
 	connected       bool
+
+	// streamMu guards the stream-scoped fields that handleStreamStart
+	// swaps on each new stream (scheduler, decoder, format, schedulerCtx,
+	// schedulerCancel) against the goroutines that read them concurrently
+	// (handleAudioChunks, pumpSchedulerOutput, Stats, stream-clear and
+	// group-update handlers, Close). Readers snapshot the pointer under the
+	// lock and use it unlocked, so the lock is never held across a blocking
+	// decode/schedule/channel operation.
+	streamMu stdsync.Mutex
 
 	// Metadata merge state. mergedMetadata is the running snapshot fed to
 	// OnMetadata; pendingMetadata holds future-dated updates sorted by
@@ -165,16 +173,24 @@ func (r *Receiver) Done() <-chan struct{} {
 	return r.ctx.Done()
 }
 
+// currentScheduler returns the active scheduler under streamMu, or nil if no
+// stream has started. Callers use the returned pointer unlocked.
+func (r *Receiver) currentScheduler() *Scheduler {
+	r.streamMu.Lock()
+	defer r.streamMu.Unlock()
+	return r.scheduler
+}
+
 // Stats returns current pipeline statistics from the scheduler and clock sync.
 func (r *Receiver) Stats() ReceiverStats {
 	stats := ReceiverStats{}
 
-	if r.scheduler != nil {
-		s := r.scheduler.Stats()
+	if sched := r.currentScheduler(); sched != nil {
+		s := sched.Stats()
 		stats.Received = s.Received
 		stats.Played = s.Played
 		stats.Dropped = s.Dropped
-		stats.BufferDepth = r.scheduler.BufferDepth()
+		stats.BufferDepth = sched.BufferDepth()
 	}
 
 	if r.clockSync != nil {
@@ -288,24 +304,34 @@ func (r *Receiver) handleStreamStart() {
 				r.notifyError(fmt.Errorf("failed to create decoder: %w", err))
 				continue
 			}
-			r.decoder = decoder
-			r.format = format
-
 			if r.config.OnStreamStart != nil {
 				r.config.OnStreamStart(format)
 			}
 
-			if r.schedulerCancel != nil {
-				r.schedulerCancel()
+			newCtx, newCancel := context.WithCancel(r.ctx)
+			newScheduler := NewScheduler(r.clockSync, r.config.BufferMs, r.config.StaticDelayMs)
+
+			// Swap the stream-scoped state under the lock, capturing the
+			// previous scheduler/cancel so we can tear them down after
+			// releasing it (Stop/cancel must not run under streamMu).
+			r.streamMu.Lock()
+			oldScheduler := r.scheduler
+			oldCancel := r.schedulerCancel
+			r.decoder = decoder
+			r.format = format
+			r.schedulerCancel = newCancel
+			r.scheduler = newScheduler
+			r.streamMu.Unlock()
+
+			if oldCancel != nil {
+				oldCancel()
 			}
-			if r.scheduler != nil {
-				r.scheduler.Stop()
+			if oldScheduler != nil {
+				oldScheduler.Stop()
 			}
 
-			r.schedulerCtx, r.schedulerCancel = context.WithCancel(r.ctx)
-			r.scheduler = NewScheduler(r.clockSync, r.config.BufferMs, r.config.StaticDelayMs)
-			go r.scheduler.Run()
-			go r.pumpSchedulerOutput(r.schedulerCtx)
+			go newScheduler.Run()
+			go r.pumpSchedulerOutput(newCtx, newScheduler)
 
 		case <-r.ctx.Done():
 			return
@@ -330,11 +356,17 @@ func (r *Receiver) handleAudioChunks() {
 	for {
 		select {
 		case chunk := <-r.client.AudioChunks:
-			if r.decoder == nil || r.scheduler == nil {
+			r.streamMu.Lock()
+			decoder := r.decoder
+			scheduler := r.scheduler
+			format := r.format
+			r.streamMu.Unlock()
+
+			if decoder == nil || scheduler == nil {
 				continue
 			}
 
-			pcm, err := r.decoder.Decode(chunk.Data)
+			pcm, err := decoder.Decode(chunk.Data)
 			if err != nil {
 				r.notifyError(fmt.Errorf("decode error: %w", err))
 				continue
@@ -346,9 +378,9 @@ func (r *Receiver) handleAudioChunks() {
 			buf := audio.Buffer{
 				Timestamp: chunk.Timestamp,
 				Samples:   pcm,
-				Format:    r.format,
+				Format:    format,
 			}
-			r.scheduler.Schedule(buf)
+			scheduler.Schedule(buf)
 
 		case <-r.ctx.Done():
 			return
@@ -356,10 +388,10 @@ func (r *Receiver) handleAudioChunks() {
 	}
 }
 
-func (r *Receiver) pumpSchedulerOutput(ctx context.Context) {
+func (r *Receiver) pumpSchedulerOutput(ctx context.Context, sched *Scheduler) {
 	for {
 		select {
-		case buf := <-r.scheduler.Output():
+		case buf := <-sched.Output():
 			select {
 			case r.output <- buf:
 			case <-ctx.Done():
@@ -377,8 +409,8 @@ func (r *Receiver) handleStreamClear() {
 		case clear := <-r.client.StreamClear:
 			log.Printf("Stream clear received for roles: %v", clear.Roles)
 			if len(clear.Roles) == 0 || containsRole(clear.Roles, "player") {
-				if r.scheduler != nil {
-					r.scheduler.Clear()
+				if sched := r.currentScheduler(); sched != nil {
+					sched.Clear()
 				}
 			}
 		case <-r.ctx.Done():
@@ -404,9 +436,9 @@ func (r *Receiver) handleStreamEnd() {
 }
 
 // handleServerState reads server/state messages from the protocol client
-// and feeds metadata updates into the merge layer. Non-metadata fields
-// of ServerStateMessage are not used today; if/when they grow handlers
-// they should branch off here.
+// and feeds role-specific state into the merge layer: metadata updates go
+// through the timestamp-ordered queue, while controller state (repeat /
+// shuffle per spec#81) is a full snapshot that applies immediately.
 func (r *Receiver) handleServerState() {
 	for {
 		select {
@@ -414,9 +446,29 @@ func (r *Receiver) handleServerState() {
 			if state.Metadata != nil {
 				r.enqueueMetadata(state.Metadata)
 			}
+			if state.Controller != nil {
+				r.applyController(state.Controller)
+			}
 		case <-r.ctx.Done():
 			return
 		}
+	}
+}
+
+// applyController merges controller state (repeat / shuffle) onto the
+// running snapshot and fires OnMetadata. Controller state carries no
+// timestamp and is a full snapshot, so it applies immediately rather than
+// going through the metadata deferral queue.
+func (r *Receiver) applyController(c *protocol.ControllerState) {
+	r.metadataMu.Lock()
+	defer r.metadataMu.Unlock()
+
+	r.mergedMetadata.Repeat = c.Repeat
+	r.mergedMetadata.Shuffle = c.Shuffle
+
+	snapshot := r.mergedMetadata
+	if r.config.OnMetadata != nil {
+		r.config.OnMetadata(snapshot)
 	}
 }
 
@@ -512,6 +564,24 @@ func (r *Receiver) applyMetadataLocked(m *protocol.MetadataState) {
 			r.mergedMetadata.Duration = 0
 		}
 	}
+	// Legacy back-compat: a v1 server may still carry repeat/shuffle on the
+	// metadata state. The canonical source is controller state (spec#81,
+	// see applyController), but honor the metadata copy via the same
+	// tristate merge so older servers still drive the snapshot.
+	if m.HasField("repeat") {
+		if m.Repeat != nil {
+			r.mergedMetadata.Repeat = *m.Repeat
+		} else {
+			r.mergedMetadata.Repeat = ""
+		}
+	}
+	if m.HasField("shuffle") {
+		if m.Shuffle != nil {
+			r.mergedMetadata.Shuffle = *m.Shuffle
+		} else {
+			r.mergedMetadata.Shuffle = false
+		}
+	}
 
 	snapshot := r.mergedMetadata
 	if r.config.OnMetadata != nil {
@@ -562,8 +632,10 @@ func (r *Receiver) handleGroupUpdates() {
 			if update.PlaybackState != nil {
 				state := *update.PlaybackState
 				log.Printf("Group playback state: %s", state)
-				if (state == "paused" || state == "stopped") && r.scheduler != nil {
-					r.scheduler.Clear()
+				if state == "paused" || state == "stopped" {
+					if sched := r.currentScheduler(); sched != nil {
+						sched.Clear()
+					}
 				}
 			}
 			if update.GroupID != nil {
@@ -790,12 +862,17 @@ func (r *Receiver) Close() error {
 		r.client.Close()
 	}
 
-	if r.scheduler != nil {
-		r.scheduler.Stop()
+	r.streamMu.Lock()
+	scheduler := r.scheduler
+	decoder := r.decoder
+	r.streamMu.Unlock()
+
+	if scheduler != nil {
+		scheduler.Stop()
 	}
 
-	if r.decoder != nil {
-		if err := r.decoder.Close(); err != nil {
+	if decoder != nil {
+		if err := decoder.Close(); err != nil {
 			log.Printf("Receiver: decoder close error: %v", err)
 		}
 	}
