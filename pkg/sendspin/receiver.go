@@ -232,9 +232,12 @@ func (r *Receiver) Connect() error {
 				{Source: "album", Format: "jpeg", MediaWidth: 600, MediaHeight: 600},
 			},
 		},
-		VisualizerV1Support: &protocol.VisualizerV1Support{
-			BufferCapacity: r.config.BufferCapacity,
-		},
+		// The visualizer role is intentionally not advertised: the receiver
+		// implements no visualizer behavior, and the visualizer@v1 support
+		// schema is an unstable draft (spec-current aiosendspin requires
+		// fields this client does not send, which fails the whole handshake —
+		// see issue #136). Advertising only what we implement keeps the
+		// client/hello forward-compatible.
 	}
 
 	r.client = protocol.NewClient(clientConfig)
