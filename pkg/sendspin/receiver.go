@@ -27,28 +27,28 @@ const (
 )
 
 // metadataApplyTickInterval is the cadence at which metadataApplyLoop wakes
-// to drain pending updates whose server timestamp has elapsed. 
+// to drain pending updates whose server timestamp has elapsed.
 const metadataApplyTickInterval = 100 * time.Millisecond
 
 type ReceiverConfig struct {
 	ServerAddr     string
 	PlayerName     string
 	BufferMs       int
-	StaticDelayMs  int   
-	PreferredCodec string 
-	BufferCapacity int    // buffer_capacity in bytes advertised to the server (default: 1048576 = 1MB
+	StaticDelayMs  int
+	PreferredCodec string
+	BufferCapacity int // buffer_capacity in bytes advertised to the server (default: 1048576 = 1MB
 	// MaxSampleRate caps the highest SampleRate advertised to the server. 0 = no cap.
 	MaxSampleRate int
-	// MaxBitDepth caps the highest BitDepth advertised to the server.  0 = no cap. 
+	// MaxBitDepth caps the highest BitDepth advertised to the server.  0 = no cap.
 	MaxBitDepth int
 	// ClientID is the already-resolved client_id to advertise in client/hello.
 	ClientID       string
 	DeviceInfo     DeviceInfo
 	DecoderFactory func(audio.Format) (decode.Decoder, error)
-	OnMetadata    func(Metadata)
-	OnStreamStart func(audio.Format)
-	OnStreamEnd   func()
-	OnError       func(error)
+	OnMetadata     func(Metadata)
+	OnStreamStart  func(audio.Format)
+	OnStreamEnd    func()
+	OnError        func(error)
 }
 
 type ReceiverStats struct {
@@ -73,12 +73,13 @@ type Receiver struct {
 	schedulerCancel context.CancelFunc
 	serverAddr      string
 	connected       bool
-	streamMu stdsync.Mutex
+	streamMu        stdsync.Mutex
 	metadataMu      stdsync.Mutex
 	mergedMetadata  Metadata
 	pendingMetadata []*protocol.MetadataState
-	clockNow func() int64
+	clockNow        func() int64
 }
+
 func NewReceiver(config ReceiverConfig) (*Receiver, error) {
 	if config.ServerAddr == "" {
 		return nil, fmt.Errorf("ReceiverConfig.ServerAddr is required")
