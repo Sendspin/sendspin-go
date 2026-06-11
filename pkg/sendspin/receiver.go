@@ -19,10 +19,7 @@ import (
 	"github.com/Sendspin/sendspin-go/pkg/sync"
 )
 
-// Time-sync burst parameters. Mirrors sendspin-cpp's TimeBurst defaults and
-// the upstream Sendspin/time-filter README "Recommended Usage" guidance: a
-// short burst of NTP-style exchanges, each waiting for its reply, with the
-// best (lowest RTT) sample fed to the filter once per burst.
+// Time-sync burst parameters.
 const (
 	timeSyncBurstSize       = 8
 	timeSyncBurstInterval   = 10 * time.Second
@@ -30,39 +27,24 @@ const (
 )
 
 // metadataApplyTickInterval is the cadence at which metadataApplyLoop wakes
-// to drain pending updates whose server timestamp has elapsed. 100 ms is
-// imperceptible for metadata display lag; do not shorten without a real
-// reason.
+// to drain pending updates whose server timestamp has elapsed. 
 const metadataApplyTickInterval = 100 * time.Millisecond
 
 type ReceiverConfig struct {
 	ServerAddr     string
 	PlayerName     string
 	BufferMs       int
-	StaticDelayMs  int    // optional static latency compensation (ms) applied to every scheduled play time
-	PreferredCodec string // "pcm", "opus", or "flac" — reorders the advertised format list so the server picks this codec first
-	BufferCapacity int    // buffer_capacity in bytes advertised to the server (default: 1048576 = 1MB)
-	// MaxSampleRate caps the highest SampleRate advertised to the server.
-	// 0 = no cap. Set this when the eventual audio output device cannot
-	// sustain higher rates (e.g. Pi3 onboard bcm2835 headphones can't
-	// actually drain 192k even though ALSA reports it accepts the format).
+	StaticDelayMs  int   
+	PreferredCodec string 
+	BufferCapacity int    // buffer_capacity in bytes advertised to the server (default: 1048576 = 1MB
+	// MaxSampleRate caps the highest SampleRate advertised to the server. 0 = no cap.
 	MaxSampleRate int
-	// MaxBitDepth caps the highest BitDepth advertised to the server.
-	// 0 = no cap. See MaxSampleRate for the motivating case.
+	// MaxBitDepth caps the highest BitDepth advertised to the server.  0 = no cap. 
 	MaxBitDepth int
 	// ClientID is the already-resolved client_id to advertise in client/hello.
-	// Required — callers should compute this once at startup (typically via
-	// ResolveClientID) and thread the same value through reconnects.
 	ClientID       string
 	DeviceInfo     DeviceInfo
 	DecoderFactory func(audio.Format) (decode.Decoder, error)
-	// OnMetadata is invoked after each server metadata update is merged
-	// onto the running snapshot. It may be called from either the
-	// server-state reader goroutine (immediate updates) or the metadata
-	// apply-loop goroutine (timestamp-deferred updates), and is invoked
-	// while an internal mutex is held — callbacks must not block on
-	// other Receiver methods. Implementations should serialize their
-	// own state if needed.
 	OnMetadata    func(Metadata)
 	OnStreamStart func(audio.Format)
 	OnStreamEnd   func()
@@ -78,8 +60,6 @@ type ReceiverStats struct {
 	SyncQuality sync.Quality
 }
 
-// Receiver handles connection, clock sync, decoding, and scheduling.
-// It emits decoded, time-stamped audio buffers via the Output() channel.
 type Receiver struct {
 	config          ReceiverConfig
 	client          *protocol.Client
@@ -93,31 +73,12 @@ type Receiver struct {
 	schedulerCancel context.CancelFunc
 	serverAddr      string
 	connected       bool
-
-	// streamMu guards the stream-scoped fields that handleStreamStart
-	// swaps on each new stream (scheduler, decoder, format, schedulerCtx,
-	// schedulerCancel) against the goroutines that read them concurrently
-	// (handleAudioChunks, pumpSchedulerOutput, Stats, stream-clear and
-	// group-update handlers, Close). Readers snapshot the pointer under the
-	// lock and use it unlocked, so the lock is never held across a blocking
-	// decode/schedule/channel operation.
 	streamMu stdsync.Mutex
-
-	// Metadata merge state. mergedMetadata is the running snapshot fed to
-	// OnMetadata; pendingMetadata holds future-dated updates sorted by
-	// ascending Timestamp until clockNow() crosses each one.
 	metadataMu      stdsync.Mutex
 	mergedMetadata  Metadata
 	pendingMetadata []*protocol.MetadataState
-
-	// clockNow returns "current server time in microseconds". Indirected
-	// from r.clockSync.ServerMicrosNow so tests can drive the
-	// timestamp-deferral path with a fake clock.
 	clockNow func() int64
 }
-
-// NewReceiver creates a new Receiver with the given configuration.
-// ServerAddr is required; other fields have defaults.
 func NewReceiver(config ReceiverConfig) (*Receiver, error) {
 	if config.ServerAddr == "" {
 		return nil, fmt.Errorf("ReceiverConfig.ServerAddr is required")
@@ -232,12 +193,6 @@ func (r *Receiver) Connect() error {
 				{Source: "album", Format: "jpeg", MediaWidth: 600, MediaHeight: 600},
 			},
 		},
-		// The visualizer role is intentionally not advertised: the receiver
-		// implements no visualizer behavior, and the visualizer@v1 support
-		// schema is an unstable draft (spec-current aiosendspin requires
-		// fields this client does not send, which fails the whole handshake —
-		// see issue #136). Advertising only what we implement keeps the
-		// client/hello forward-compatible.
 	}
 
 	r.client = protocol.NewClient(clientConfig)
@@ -437,11 +392,6 @@ func (r *Receiver) handleStreamEnd() {
 		}
 	}
 }
-
-// handleServerState reads server/state messages from the protocol client
-// and feeds role-specific state into the merge layer: metadata updates go
-// through the timestamp-ordered queue, while controller state (repeat /
-// shuffle per spec#81) is a full snapshot that applies immediately.
 func (r *Receiver) handleServerState() {
 	for {
 		select {
@@ -457,11 +407,6 @@ func (r *Receiver) handleServerState() {
 		}
 	}
 }
-
-// applyController merges controller state (repeat / shuffle) onto the
-// running snapshot and fires OnMetadata. Controller state carries no
-// timestamp and is a full snapshot, so it applies immediately rather than
-// going through the metadata deferral queue.
 func (r *Receiver) applyController(c *protocol.ControllerState) {
 	r.metadataMu.Lock()
 	defer r.metadataMu.Unlock()
@@ -474,14 +419,6 @@ func (r *Receiver) applyController(c *protocol.ControllerState) {
 		r.config.OnMetadata(snapshot)
 	}
 }
-
-// enqueueMetadata accepts a server metadata update and either applies it
-// immediately (timestamp <= current server time, or zero timestamp) or
-// queues it for future application sorted by ascending timestamp.
-//
-// Zero / negative timestamps apply immediately. Per spec, MetadataState
-// always carries a timestamp, but defending against malformed servers
-// costs nothing and keeps existing snapshot-style emitters working.
 func (r *Receiver) enqueueMetadata(m *protocol.MetadataState) {
 	r.metadataMu.Lock()
 	defer r.metadataMu.Unlock()
@@ -501,15 +438,6 @@ func (r *Receiver) enqueueMetadata(m *protocol.MetadataState) {
 	copy(r.pendingMetadata[idx+1:], r.pendingMetadata[idx:])
 	r.pendingMetadata[idx] = m
 }
-
-// applyMetadataLocked merges the update onto mergedMetadata per tristate
-// rules and fires OnMetadata. Caller must hold r.metadataMu.
-//
-// For each field: if the wire key was absent, preserve the prior value;
-// if present and null (pointer is nil after decode), reset to zero; if
-// present with a value, replace. The progress field is atomic per spec —
-// a non-null progress always carries all three fields, so we either take
-// TrackDuration or zero Duration.
 func (r *Receiver) applyMetadataLocked(m *protocol.MetadataState) {
 	if m.HasField("title") {
 		if m.Title != nil {
@@ -591,9 +519,6 @@ func (r *Receiver) applyMetadataLocked(m *protocol.MetadataState) {
 		r.config.OnMetadata(snapshot)
 	}
 }
-
-// metadataApplyLoop drains pendingMetadata as server time crosses each
-// queued update's timestamp. Started as a goroutine in Connect.
 func (r *Receiver) metadataApplyLoop() {
 	ticker := time.NewTicker(metadataApplyTickInterval)
 	defer ticker.Stop()
@@ -606,10 +531,6 @@ func (r *Receiver) metadataApplyLoop() {
 		}
 	}
 }
-
-// drainPendingMetadata applies every pending update whose timestamp has
-// elapsed, in ascending timestamp order. Pending is kept sorted by
-// enqueueMetadata, so we can stop at the first future-dated entry.
 func (r *Receiver) drainPendingMetadata() {
 	r.metadataMu.Lock()
 	defer r.metadataMu.Unlock()
@@ -674,12 +595,6 @@ func (r *Receiver) performInitialSync() error {
 	log.Printf("Initial clock sync complete: rtt=%dus, quality=%v", rtt, quality)
 	return nil
 }
-
-// clockSyncLoop fires a time-sync burst every timeSyncBurstInterval. The old
-// per-second single-message pattern was replaced by the burst-best strategy
-// recommended by the upstream Sendspin/time-filter README and implemented by
-// sendspin-cpp's TimeBurst — it converges faster and rejects high-RTT
-// outliers without an explicit threshold.
 func (r *Receiver) clockSyncLoop() {
 	ticker := time.NewTicker(timeSyncBurstInterval)
 	defer ticker.Stop()
@@ -694,16 +609,7 @@ func (r *Receiver) clockSyncLoop() {
 	}
 }
 
-// runTimeSyncBurst sends `size` time messages back-to-back, each waiting for
-// its reply, tracks the sample with the lowest RTT, and feeds only that best
-// sample to the clock-sync filter at burst end. Mirrors sendspin-cpp's
-// TimeBurst loop. Strictly serial — bursts run on TCP/WebSocket where a
-// delayed earlier message also delays its successors, so parallel sends
-// would not give independent RTT measurements.
 func (r *Receiver) runTimeSyncBurst(size int) {
-	// Drain any responses left over from a prior burst (e.g. a timed-out
-	// reply that arrived after the per-message timeout fired). Keeps the
-	// next-message recv from picking up a stale sample.
 drainLoop:
 	for {
 		select {
@@ -752,17 +658,6 @@ drainLoop:
 
 	r.clockSync.ProcessSyncResponse(bestT1, bestT2, bestT3, bestT4)
 }
-
-// buildSupportedFormats returns the player's advertised format list,
-// optionally filtered by maxSampleRate / maxBitDepth (0 = no cap) and
-// reordered so preferredCodec entries come first when set.
-//
-// Filter happens before reorder, so the surviving preferred-codec entries
-// stay grouped at the head. Returns an empty slice when the caps exclude
-// every format — callers can detect that and fail loudly. We do NOT
-// fabricate a fallback entry: if the user asks for caps no format can
-// satisfy, the honest response is empty, and the resulting handshake
-// failure is the right user-visible signal.
 func buildSupportedFormats(preferredCodec string, maxSampleRate, maxBitDepth int) []protocol.AudioFormat {
 	allFormats := []protocol.AudioFormat{
 		{Codec: "pcm", Channels: 2, SampleRate: 192000, BitDepth: 24},
@@ -806,16 +701,6 @@ func buildSupportedFormats(preferredCodec string, maxSampleRate, maxBitDepth int
 	}
 	return append(preferred, rest...)
 }
-
-// logAdvertisedFormats writes one summary line describing what the player
-// is about to send in client/hello — codec set, max rate, max depth, and
-// the cap that produced the list. Operators reading the log can answer
-// "what did this player say it could do?" without having to inspect server
-// traces.
-//
-// Empty list goes out as a WARNING: the resulting handshake produces only
-// a generic negotiation failure, so surfacing the cause player-side saves
-// users from chasing the same symptom on the server.
 func logAdvertisedFormats(formats []protocol.AudioFormat, maxSampleRate, maxBitDepth int) {
 	capDesc := "no cap"
 	if maxSampleRate > 0 || maxBitDepth > 0 {
@@ -853,8 +738,6 @@ func (r *Receiver) notifyError(err error) {
 }
 
 func (r *Receiver) Close() error {
-	// Send goodbye BEFORE cancelling the context so the message
-	// reaches the server while the connection is still alive.
 	if r.client != nil {
 		r.client.SendGoodbye("shutdown")
 	}
