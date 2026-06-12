@@ -21,7 +21,7 @@
 //
 // Example Server:
 //
-//	source, err := sendspin.FileSource("/path/to/audio.flac")
+//	source := sendspin.NewTestTone(48000, 2) // or implement AudioSource
 //	server, err := sendspin.NewServer(sendspin.ServerConfig{
 //	    Port:   8927,
 //	    Source: source,
