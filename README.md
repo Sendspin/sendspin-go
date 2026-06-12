@@ -104,7 +104,6 @@ See the [examples/](examples/) directory for more complete examples:
 - **Audio processing**: `pkg/audio` - Format types, codecs, resampling, output
 - **Protocol**: `pkg/protocol` - WebSocket client and message types
 - **Clock sync**: `pkg/sync` - Precise timing synchronization
-- **Discovery**: `pkg/discovery` - mDNS service discovery
 
 Full API documentation: https://pkg.go.dev/github.com/Sendspin/sendspin-go
 
@@ -459,12 +458,9 @@ Lower-level building blocks for custom implementations:
 
 - **`pkg/audio`**: Format types, sample conversions, Buffer
 - **`pkg/audio/decode`**: PCM, Opus, FLAC, MP3 decoders
-- **`pkg/audio/encode`**: PCM, Opus encoders
-- **`pkg/audio/resample`**: Sample rate conversion
 - **`pkg/audio/output`**: Audio playback via malgo (miniaudio); 16/24/32-bit native
 - **`pkg/protocol`**: WebSocket client, message types
 - **`pkg/sync`**: Clock synchronization with drift compensation
-- **`pkg/discovery`**: mDNS service discovery
 
 ### 3. CLI Tools
 
