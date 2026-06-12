@@ -622,12 +622,3 @@ func (p *Player) notifyError(err error) {
 		log.Printf("Player error: %v", err)
 	}
 }
-
-func containsRole(roles []string, role string) bool {
-	for _, r := range roles {
-		if r == role {
-			return true
-		}
-	}
-	return false
-}

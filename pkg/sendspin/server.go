@@ -21,21 +21,6 @@ import (
 	"github.com/gorilla/websocket"
 )
 
-const (
-	ProtocolVersion = 1
-
-	// Binary message type IDs per spec (bits 7-2 for role, bits 1-0 for slot)
-	// Player role: 000001xx (4-7), slot 0 = 4
-	AudioChunkMessageType = 4
-
-	DefaultSampleRate = 192000
-	DefaultChannels   = 2
-	DefaultBitDepth   = 24
-
-	ChunkDurationMs = 20  // 20ms chunks
-	BufferAheadMs   = 500 // Send audio 500ms ahead
-)
-
 type ServerConfig struct {
 	// Port to listen on (default: 8927)
 	Port int

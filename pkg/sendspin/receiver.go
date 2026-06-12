@@ -378,6 +378,16 @@ func (r *Receiver) handleStreamClear() {
 	}
 }
 
+// containsRole reports whether role appears in the roles slice.
+func containsRole(roles []string, role string) bool {
+	for _, r := range roles {
+		if r == role {
+			return true
+		}
+	}
+	return false
+}
+
 func (r *Receiver) handleStreamEnd() {
 	for {
 		select {

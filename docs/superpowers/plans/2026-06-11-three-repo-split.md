@@ -94,11 +94,11 @@ Each phase is independently shippable and keeps `make test` + `make conformance`
 - [x] Remove dead `ResampledSource` + `internal/server/resampler.go`; fix the stale "Resonate" godoc in `pkg/protocol/doc.go`.
 - [ ] Remove the `NewFileSource` stub — folded into Phase 1 (handled with the `source.go` split).
 
-### Phase 1 — Decompose `pkg/sendspin` by file, in place
-- [ ] Split `config.go` → `config_common.go` / `config_player.go` / `config_server.go`.
-- [ ] Split `source.go`; replace/remove the `NewFileSource` stub.
-- [ ] Hoist `ChunkDurationMs`, `Default{SampleRate,Channels,BitDepth}` to a neutral home (a shared constants file or `pkg/audio`); move `containsRole` next to the client core.
-- Gate: `make test` + `make conformance` green.
+### Phase 1 — Decompose `pkg/sendspin` by file, in place ✅
+- [x] Split `config.go` → `config_common.go` / `config_player.go` / `config_server.go`.
+- [x] Split `source.go` (→ `source.go` interface + `source_testtone.go`); removed the dead `NewFileSource` stub.
+- [x] Hoist `ChunkDurationMs`, `Default{SampleRate,Channels,BitDepth}`, `ProtocolVersion`, `AudioChunkMessageType`, `BufferAheadMs` to a neutral `constants.go`; moved `containsRole` next to its only user (`receiver.go`).
+- Gate: `make test` green locally (12→ same after the file moves); `make conformance` runs in CI. **No public API change** — all symbols kept the same package + names, so the conformance adapter and external importers are unaffected.
 
 ### Phase 2 — Promote cross-boundary `internal/` to public `pkg/` (still one module)
 - [ ] Promote `internal/discovery` `Manager`/types → `pkg/discovery`; repoint `server.go`/`client_dialer.go`.
@@ -129,3 +129,4 @@ Each phase is independently shippable and keeps `make test` + `make conformance`
 ## Progress log
 
 - 2026-06-11: Plan written. Phase 0 complete (in one PR): removed the dead legacy `internal/server` server, the orphaned `pkg/discovery` and `pkg/audio/encode` packages, dead `ResampledSource`/`internal/server/resampler.go`, and fixed stale protocol godoc. `NewFileSource` stub deferred to Phase 1. Net ~1.4 KLOC of dead code removed.
+- 2026-06-11: Phase 1 complete — decomposed `pkg/sendspin` by file (in place, same package, no public API change): hoisted shared constants to `constants.go`, split `config.go` into common/player/server, split `source.go` and removed the `NewFileSource` stub, moved `containsRole` to `receiver.go`. Sets up the eventual client/server package split as a mechanical move.
