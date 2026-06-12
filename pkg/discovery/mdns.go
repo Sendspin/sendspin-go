@@ -1,5 +1,8 @@
 // ABOUTME: mDNS service discovery for Sendspin Protocol
 // ABOUTME: Handles both advertisement (server-initiated) and browsing (client-initiated)
+
+// Package discovery provides mDNS service discovery for Sendspin: advertising a
+// server, and browsing for servers (client side) or clients (server side).
 package discovery
 
 import (

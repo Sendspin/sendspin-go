@@ -73,7 +73,6 @@ Binary message-type IDs encode role bits 7–2 / slot bits 1–0 per spec. Binar
 
 - **`internal/server`**: Audio engine, source decoders, Opus/FLAC encoders, resampler, server TUI. `pkg/sendspin.Server` is a façade over this.
 - **`internal/ui`**: bubbletea models, hotkey/device-picker widgets shared by both binaries.
-- **`internal/discovery`**: mDNS plumbing (TXT parsing, browse loops) used by `pkg/discovery`.
 - **`internal/version`**: ldflags version target.
 
 The legacy `internal/{app,artwork,audio,client,player,protocol,sync}` packages were deleted in the v1.2 "rip-legacy-cli" sweep. Do not reintroduce that layering.
