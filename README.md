@@ -68,7 +68,7 @@ import (
 )
 
 func main() {
-    // Create test tone source (or use NewFileSource)
+    // Create test tone source (or implement AudioSource)
     source := sendspin.NewTestTone(192000, 2)
 
     // Create and start server
