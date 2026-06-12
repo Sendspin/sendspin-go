@@ -87,10 +87,12 @@ Medium: `OnMetadata` invoked under `metadataMu`; `server/state`/`group/update` b
 
 Each phase is independently shippable and keeps `make test` + `make conformance` green. The principle: **do all decomposition inside the current single module first**, where the full test + conformance suites still validate everything, before extracting any module.
 
-### Phase 0 — Decisions + dead-code removal (this PR and follow-ups)
+### Phase 0 — Decisions + dead-code removal (this PR)
 - [x] Lock the SDK-scope decision (one SDK, client+server). *(this doc)*
-- [ ] **Delete the dead legacy `internal/server` server** (`server.go`, `audio_engine.go`, `tui_update.go`, `audio_engine_test.go`); relocate the two constants the surviving sources need. *(first cleanup commit — in this PR)*
-- [ ] Delete orphaned `pkg/discovery` and `pkg/audio/encode` (or re-home), plus `ResampledSource`/`resampler.go`, `NewFileSource`, stale docs.
+- [x] **Delete the dead legacy `internal/server` server** (`server.go`, `audio_engine.go`, `tui_update.go`, `audio_engine_test.go`); relocate the two constants the surviving sources need.
+- [x] Delete orphaned `pkg/discovery` (had a 3-ns browse-timeout bug) and `pkg/audio/encode`; drop their README references.
+- [x] Remove dead `ResampledSource` + `internal/server/resampler.go`; fix the stale "Resonate" godoc in `pkg/protocol/doc.go`.
+- [ ] Remove the `NewFileSource` stub — folded into Phase 1 (handled with the `source.go` split).
 
 ### Phase 1 — Decompose `pkg/sendspin` by file, in place
 - [ ] Split `config.go` → `config_common.go` / `config_player.go` / `config_server.go`.
@@ -126,4 +128,4 @@ Each phase is independently shippable and keeps `make test` + `make conformance`
 
 ## Progress log
 
-- 2026-06-11: Plan written. First cleanup commit: remove dead legacy `internal/server` server.
+- 2026-06-11: Plan written. Phase 0 complete (in one PR): removed the dead legacy `internal/server` server, the orphaned `pkg/discovery` and `pkg/audio/encode` packages, dead `ResampledSource`/`internal/server/resampler.go`, and fixed stale protocol godoc. `NewFileSource` stub deferred to Phase 1. Net ~1.4 KLOC of dead code removed.
