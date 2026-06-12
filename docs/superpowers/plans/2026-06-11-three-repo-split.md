@@ -101,8 +101,8 @@ Each phase is independently shippable and keeps `make test` + `make conformance`
 - Gate: `make test` green locally (12→ same after the file moves); `make conformance` runs in CI. **No public API change** — all symbols kept the same package + names, so the conformance adapter and external importers are unaffected.
 
 ### Phase 2 — Promote cross-boundary `internal/` to public `pkg/` (still one module)
-- [ ] Promote `internal/discovery` `Manager`/types → `pkg/discovery`; repoint `server.go`/`client_dialer.go`.
-- [ ] Promote encoders → `pkg/audio/encode`; repoint `server.go`/`server_client.go`/`role_player.go`. Verify both `make test` and `make BUILDTAGS= test` (the opus.Stream path).
+- [x] Promote `internal/discovery` → `pkg/discovery` (verbatim move; repointed `main.go`, `server.go`, `client_dialer.go`). `pkg/sendspin` no longer imports `internal/discovery`.
+- [ ] Promote encoders → `pkg/audio/encode`; repoint `server.go`/`server_client.go`/`role_player.go`. Verify both `make test` and `make BUILDTAGS= test` (the opus.Stream path). **Note:** `internal/server` has its own `AudioSource` interface and `Default*` constants entangled with the sources — reconcile when moving sources.
 - [ ] Promote source decoders → `pkg/audio/source`; leave server TUI in `internal/`.
 - Gate (critical checkpoint): SDK has **zero cross-boundary `internal/` imports**; `make test` + `make conformance` green.
 
@@ -130,3 +130,4 @@ Each phase is independently shippable and keeps `make test` + `make conformance`
 
 - 2026-06-11: Plan written. Phase 0 complete (in one PR): removed the dead legacy `internal/server` server, the orphaned `pkg/discovery` and `pkg/audio/encode` packages, dead `ResampledSource`/`internal/server/resampler.go`, and fixed stale protocol godoc. `NewFileSource` stub deferred to Phase 1. Net ~1.4 KLOC of dead code removed.
 - 2026-06-11: Phase 1 complete — decomposed `pkg/sendspin` by file (in place, same package, no public API change): hoisted shared constants to `constants.go`, split `config.go` into common/player/server, split `source.go` and removed the `NewFileSource` stub, moved `containsRole` to `receiver.go`. Sets up the eventual client/server package split as a mechanical move.
+- 2026-06-11: Phase 2 (1/3) — promoted `internal/discovery` → `pkg/discovery` (verbatim move, repointed importers). Encoders and source decoders are the remaining two promotions; they need interface/constant reconciliation (`internal/server` has its own `AudioSource`) so they land as separate PRs.
