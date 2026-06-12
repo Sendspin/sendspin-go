@@ -1,6 +1,6 @@
 // ABOUTME: Opus audio encoder for bandwidth-efficient streaming
 // ABOUTME: Wraps libopus to encode PCM audio to Opus format
-package server
+package encode
 
 import (
 	"fmt"

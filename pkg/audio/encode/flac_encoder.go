@@ -1,6 +1,6 @@
 // ABOUTME: FLAC audio encoder for lossless streaming
 // ABOUTME: Wraps mewkiz/flac to encode PCM int32 samples to FLAC frames
-package server
+package encode
 
 import (
 	"bytes"

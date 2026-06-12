@@ -9,8 +9,8 @@ import (
 	"sync"
 	"time"
 
-	"github.com/Sendspin/sendspin-go/internal/server"
 	"github.com/Sendspin/sendspin-go/pkg/audio"
+	"github.com/Sendspin/sendspin-go/pkg/audio/encode"
 	"github.com/Sendspin/sendspin-go/pkg/protocol"
 	"github.com/gorilla/websocket"
 )
@@ -37,8 +37,8 @@ type ServerClient struct {
 	goodbyeReason string // reason from the last client/goodbye, if any
 
 	codec         string
-	opusEncoder   *server.OpusEncoder
-	flacEncoder   *server.FLACEncoder
+	opusEncoder   *encode.OpusEncoder
+	flacEncoder   *encode.FLACEncoder
 	resampler     *audio.Resampler // non-nil only when source rate != 48kHz
 	bufferTracker *BufferTracker
 
