@@ -1,6 +1,6 @@
 // ABOUTME: Tests for the FLAC encoder
 // ABOUTME: Verifies round-trip encode produces valid FLAC frames with compression
-package server
+package encode
 
 import (
 	"testing"

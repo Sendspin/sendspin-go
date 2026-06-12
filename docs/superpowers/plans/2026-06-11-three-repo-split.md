@@ -101,9 +101,10 @@ Each phase is independently shippable and keeps `make test` + `make conformance`
 - Gate: `make test` green locally (12→ same after the file moves); `make conformance` runs in CI. **No public API change** — all symbols kept the same package + names, so the conformance adapter and external importers are unaffected.
 
 ### Phase 2 — Promote cross-boundary `internal/` to public `pkg/` (still one module)
-- [x] Promote `internal/discovery` → `pkg/discovery` (verbatim move; repointed `main.go`, `server.go`, `client_dialer.go`). `pkg/sendspin` no longer imports `internal/discovery`.
-- [ ] Promote encoders → `pkg/audio/encode`; repoint `server.go`/`server_client.go`/`role_player.go`. Verify both `make test` and `make BUILDTAGS= test` (the opus.Stream path). **Note:** `internal/server` has its own `AudioSource` interface and `Default*` constants entangled with the sources — reconcile when moving sources.
-- [ ] Promote source decoders → `pkg/audio/source`; leave server TUI in `internal/`.
+- [x] Promote `internal/discovery` → `pkg/discovery` (verbatim move; repointed `main.go`, `server.go`, `client_dialer.go`). `pkg/sendspin` no longer imports `internal/discovery`. *(PR #141, merged)*
+- [x] Promote encoders → `pkg/audio/encode` (verbatim; repointed `role_player.go`/`server.go`/`server_client.go`). **This was the only thing `pkg/sendspin` used from `internal/server`**, so it dropped the dependency entirely.
+- [x] **GATE MET** — `go list -deps ./pkg/...` confirms `pkg/` imports **zero** `internal/` packages. `internal/server` (sources + TUI) is now used only by `cmd/sendspin-server` → can stay private to the future server-CLI repo.
+- [ ] *(Optional, deferred)* Promote source decoders → `pkg/audio/source`. **No longer required for the boundary** — only `cmd` uses them, not the SDK. This is now a product decision: do we want the SDK to ship built-in file/MP3/FLAC/HLS sources to library consumers, or are sources a CLI concern? Decide before/with Phase 3.
 - Gate (critical checkpoint): SDK has **zero cross-boundary `internal/` imports**; `make test` + `make conformance` green.
 
 ### Phase 3 — Extract the two CLI modules
@@ -131,3 +132,4 @@ Each phase is independently shippable and keeps `make test` + `make conformance`
 - 2026-06-11: Plan written. Phase 0 complete (in one PR): removed the dead legacy `internal/server` server, the orphaned `pkg/discovery` and `pkg/audio/encode` packages, dead `ResampledSource`/`internal/server/resampler.go`, and fixed stale protocol godoc. `NewFileSource` stub deferred to Phase 1. Net ~1.4 KLOC of dead code removed.
 - 2026-06-11: Phase 1 complete — decomposed `pkg/sendspin` by file (in place, same package, no public API change): hoisted shared constants to `constants.go`, split `config.go` into common/player/server, split `source.go` and removed the `NewFileSource` stub, moved `containsRole` to `receiver.go`. Sets up the eventual client/server package split as a mechanical move.
 - 2026-06-11: Phase 2 (1/3) — promoted `internal/discovery` → `pkg/discovery` (verbatim move, repointed importers). Encoders and source decoders are the remaining two promotions; they need interface/constant reconciliation (`internal/server` has its own `AudioSource`) so they land as separate PRs.
+- 2026-06-11: Phase 2 GATE MET — promoted Opus/FLAC encoders → `pkg/audio/encode`. This turned out to be the *only* `internal/server` symbol the SDK used, so `pkg/` now has **zero** `internal/` imports (verified via `go list -deps`). The third promotion (source decoders → `pkg/audio/source`) is downgraded to optional: only `cmd/sendspin-server` uses the sources, so `internal/server` can stay private to the server-CLI repo. Phase 3 (extract CLI modules) is now unblocked.

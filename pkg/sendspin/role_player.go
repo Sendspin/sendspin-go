@@ -6,8 +6,8 @@ import (
 	"encoding/base64"
 	"log"
 
-	"github.com/Sendspin/sendspin-go/internal/server"
 	"github.com/Sendspin/sendspin-go/pkg/audio"
+	"github.com/Sendspin/sendspin-go/pkg/audio/encode"
 	"github.com/Sendspin/sendspin-go/pkg/protocol"
 )
 
@@ -18,12 +18,12 @@ type PlayerRoleConfig struct {
 	BitDepth   int
 
 	// NewEncoder creates an Opus encoder when needed. When nil, Opus
-	// clients fall back to PCM. Typically set to server.NewOpusEncoder.
-	NewEncoder func(sampleRate, channels, chunkSamples int) (*server.OpusEncoder, error)
+	// clients fall back to PCM. Typically set to encode.NewOpusEncoder.
+	NewEncoder func(sampleRate, channels, chunkSamples int) (*encode.OpusEncoder, error)
 
 	// NewFLACEncoder creates a FLAC encoder when needed. When nil, FLAC
 	// clients fall back to PCM.
-	NewFLACEncoder func(sampleRate, channels, bitDepth, blockSize int) (*server.FLACEncoder, error)
+	NewFLACEncoder func(sampleRate, channels, bitDepth, blockSize int) (*encode.FLACEncoder, error)
 }
 
 // PlayerGroupRole handles the "player" role family. On client join it
@@ -50,8 +50,8 @@ func (r *PlayerGroupRole) OnClientJoin(c *ServerClient) {
 
 	codec := negotiateCodec(c, r.config.SampleRate)
 
-	var opusEncoder *server.OpusEncoder
-	var flacEncoder *server.FLACEncoder
+	var opusEncoder *encode.OpusEncoder
+	var flacEncoder *encode.FLACEncoder
 	var resampler *audio.Resampler
 
 	switch codec {

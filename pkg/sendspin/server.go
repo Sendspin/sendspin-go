@@ -14,7 +14,7 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/Sendspin/sendspin-go/internal/server"
+	"github.com/Sendspin/sendspin-go/pkg/audio/encode"
 	"github.com/Sendspin/sendspin-go/pkg/discovery"
 	"github.com/Sendspin/sendspin-go/pkg/protocol"
 	"github.com/google/uuid"
@@ -136,11 +136,11 @@ func NewServer(config ServerConfig) (*Server, error) {
 		SampleRate: s.audioSource.SampleRate(),
 		Channels:   s.audioSource.Channels(),
 		BitDepth:   DefaultBitDepth,
-		NewEncoder: func(sampleRate, channels, chunkSamples int) (*server.OpusEncoder, error) {
-			return server.NewOpusEncoder(sampleRate, channels, chunkSamples)
+		NewEncoder: func(sampleRate, channels, chunkSamples int) (*encode.OpusEncoder, error) {
+			return encode.NewOpusEncoder(sampleRate, channels, chunkSamples)
 		},
-		NewFLACEncoder: func(sampleRate, channels, bitDepth, blockSize int) (*server.FLACEncoder, error) {
-			return server.NewFLACEncoder(sampleRate, channels, bitDepth, blockSize)
+		NewFLACEncoder: func(sampleRate, channels, bitDepth, blockSize int) (*encode.FLACEncoder, error) {
+			return encode.NewFLACEncoder(sampleRate, channels, bitDepth, blockSize)
 		},
 	}))
 
