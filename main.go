@@ -248,7 +248,7 @@ func main() {
 
 	if !*noReconnect && disc != nil {
 		config.Reconnect.Rediscover = func(ctx context.Context) (string, error) {
-			// clean up the service discovery browser in any case 
+			// clean up the service discovery browser in any case
 			browseCtx, cancelBrowse := context.WithCancel(ctx)
 			defer cancelBrowse()
 			disc.BrowseContext(browseCtx)
