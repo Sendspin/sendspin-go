@@ -133,21 +133,16 @@ func (m *Manager) Advertise() error {
 	return nil
 }
 
-// Browse searches for servers until Stop is called. Each call starts its own
-// query loop; use BrowseContext to bound it.
 func (m *Manager) Browse() error {
 	return m.BrowseContext(context.Background())
 }
 
-// BrowseContext searches for servers until ctx is done or Stop is called.
-// Callers MUST cancel ctx once they stop reading Servers(), or the query
-// loop and its sockets stay alive.
 func (m *Manager) BrowseContext(ctx context.Context) error {
-	ctx, cancel := context.WithCancel(ctx)
-	stop := context.AfterFunc(m.ctx, cancel)
+	ctx, cancelBrowse := context.WithCancel(ctx)
+	unlinkManager := context.AfterFunc(m.ctx, cancelBrowse)
 	go func() {
-		defer stop()
-		defer cancel()
+		defer unlinkManager()
+		defer cancelBrowse()
 		m.browseLoop(ctx)
 	}()
 	return nil
