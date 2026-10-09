@@ -16,9 +16,7 @@ import (
 )
 
 func TestBrowseContextDiscoversServer(t *testing.T) {
-	// mDNS multicast is unreliable in some environments (CI sandboxes,
-	// Windows boxes with strict firewalls or Hyper-V virtual switches).
-	// Opt in with SENDSPIN_MULTICAST_TESTS=1 when running locally.
+	// Requires multicast; opt in with SENDSPIN_MULTICAST_TESTS=1.
 	if os.Getenv("SENDSPIN_MULTICAST_TESTS") == "" {
 		t.Skip("requires multicast; set SENDSPIN_MULTICAST_TESTS=1 to enable")
 	}
