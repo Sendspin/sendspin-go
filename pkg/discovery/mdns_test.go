@@ -3,8 +3,11 @@
 package discovery
 
 import (
+	"context"
 	"net"
+	"runtime"
 	"testing"
+	"time"
 
 	"github.com/hashicorp/mdns"
 )
@@ -138,5 +141,45 @@ func TestManagerExposesClientsChannel(t *testing.T) {
 	case <-ch:
 		t.Fatal("unexpected value on empty clients channel")
 	default:
+	}
+}
+
+func TestBrowseContextStopsOnCancel(t *testing.T) {
+	mgr := NewManager(Config{ServiceName: "Test", Port: 8929})
+	defer mgr.Stop()
+
+	baseline := runtime.NumGoroutine()
+	for i := 0; i < 20; i++ {
+		ctx, cancel := context.WithCancel(context.Background())
+		if err := mgr.BrowseContext(ctx); err != nil {
+			t.Fatalf("BrowseContext: %v", err)
+		}
+		cancel()
+	}
+
+	deadline := time.Now().Add(5 * time.Second)
+	for runtime.NumGoroutine() > baseline {
+		if time.Now().After(deadline) {
+			t.Fatalf("browse goroutines leaked: %d running, baseline %d", runtime.NumGoroutine(), baseline)
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+}
+
+func TestBrowseContextStopsOnManagerStop(t *testing.T) {
+	mgr := NewManager(Config{ServiceName: "Test", Port: 8930})
+
+	baseline := runtime.NumGoroutine()
+	if err := mgr.BrowseContext(context.Background()); err != nil {
+		t.Fatalf("BrowseContext: %v", err)
+	}
+	mgr.Stop()
+
+	deadline := time.Now().Add(5 * time.Second)
+	for runtime.NumGoroutine() > baseline {
+		if time.Now().After(deadline) {
+			t.Fatalf("browse goroutines leaked: %d running, baseline %d", runtime.NumGoroutine(), baseline)
+		}
+		time.Sleep(50 * time.Millisecond)
 	}
 }

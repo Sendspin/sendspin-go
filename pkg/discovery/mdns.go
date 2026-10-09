@@ -133,15 +133,30 @@ func (m *Manager) Advertise() error {
 	return nil
 }
 
+// Browse searches for servers until Stop is called. Each call starts its own
+// query loop; use BrowseContext to bound it.
 func (m *Manager) Browse() error {
-	go m.browseLoop()
+	return m.BrowseContext(context.Background())
+}
+
+// BrowseContext searches for servers until ctx is done or Stop is called.
+// Callers MUST cancel ctx once they stop reading Servers(), or the query
+// loop and its sockets stay alive.
+func (m *Manager) BrowseContext(ctx context.Context) error {
+	ctx, cancel := context.WithCancel(ctx)
+	stop := context.AfterFunc(m.ctx, cancel)
+	go func() {
+		defer stop()
+		defer cancel()
+		m.browseLoop(ctx)
+	}()
 	return nil
 }
 
-func (m *Manager) browseLoop() {
+func (m *Manager) browseLoop(ctx context.Context) {
 	for {
 		select {
-		case <-m.ctx.Done():
+		case <-ctx.Done():
 			return
 		default:
 		}
@@ -171,7 +186,7 @@ func (m *Manager) browseLoop() {
 
 				select {
 				case m.servers <- server:
-				case <-m.ctx.Done():
+				case <-ctx.Done():
 					return
 				}
 			}
@@ -185,7 +200,7 @@ func (m *Manager) browseLoop() {
 			Logger:  silentLogger,
 		}
 
-		mdns.Query(params)
+		_ = mdns.QueryContext(ctx, params)
 		close(entries)
 	}
 }
