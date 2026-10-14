@@ -1,3 +1,7 @@
+> [!CAUTION]
+> **This library is currently unmaintained.** If you want to maintain it, please reach out here or on Discord.
+
+
 # Sendspin Go
 
 A complete Sendspin Protocol implementation in Go, featuring both server and player components for synchronized multi-room audio streaming.
