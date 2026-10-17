@@ -157,7 +157,8 @@ func main() {
 			Port:        *port,
 		})
 		disc.Advertise()
-		disc.Browse()
+		browseCtx, cancelBrowse := context.WithCancel(context.Background())
+		disc.BrowseContext(browseCtx)
 
 		// Wait for server discovery or shutdown
 		select {
@@ -165,9 +166,11 @@ func main() {
 			serverAddress = fmt.Sprintf("%s:%d", server.Host, server.Port)
 			log.Printf("Discovered server at %s", serverAddress)
 		case sig := <-sigChan:
+			cancelBrowse()
 			log.Printf("Received %v during discovery, shutting down", sig)
 			return
 		}
+		cancelBrowse()
 	} else {
 		serverAddress = *serverAddr
 	}
@@ -245,7 +248,10 @@ func main() {
 
 	if !*noReconnect && disc != nil {
 		config.Reconnect.Rediscover = func(ctx context.Context) (string, error) {
-			disc.Browse()
+			// clean up the service discovery browser in any case
+			browseCtx, cancelBrowse := context.WithCancel(ctx)
+			defer cancelBrowse()
+			disc.BrowseContext(browseCtx)
 			select {
 			case server := <-disc.Servers():
 				addr := fmt.Sprintf("%s:%d", server.Host, server.Port)

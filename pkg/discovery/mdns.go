@@ -134,14 +134,24 @@ func (m *Manager) Advertise() error {
 }
 
 func (m *Manager) Browse() error {
-	go m.browseLoop()
+	return m.BrowseContext(context.Background())
+}
+
+func (m *Manager) BrowseContext(ctx context.Context) error {
+	ctx, cancelBrowse := context.WithCancel(ctx)
+	unlinkManager := context.AfterFunc(m.ctx, cancelBrowse)
+	go func() {
+		defer unlinkManager()
+		defer cancelBrowse()
+		m.browseLoop(ctx)
+	}()
 	return nil
 }
 
-func (m *Manager) browseLoop() {
+func (m *Manager) browseLoop(ctx context.Context) {
 	for {
 		select {
-		case <-m.ctx.Done():
+		case <-ctx.Done():
 			return
 		default:
 		}
@@ -171,7 +181,7 @@ func (m *Manager) browseLoop() {
 
 				select {
 				case m.servers <- server:
-				case <-m.ctx.Done():
+				case <-ctx.Done():
 					return
 				}
 			}
@@ -185,7 +195,7 @@ func (m *Manager) browseLoop() {
 			Logger:  silentLogger,
 		}
 
-		mdns.Query(params)
+		_ = mdns.QueryContext(ctx, params)
 		close(entries)
 	}
 }
